@@ -4,7 +4,7 @@ A credential vault for [Paperclip](https://github.com/paperclipai/paperclip) age
 host service.
 
 Agents never hold a standing secret or a password. When an agent needs to log in to a website or to call an API, it asks the vault
-for a short lease. The vault checks hard limits that only the host owner can change, a language model (the gatekeeper) decides each
+for a short lease. The vault checks hard limits that only the host owner can change, a decision model (the judge) decides each
 request that passes those limits, and a login helper that runs outside every agent sandbox performs the login. The agent gets back a
 file with a browser session or a short-lived access token that stops working when the lease ends; it never sees the password, the
 one-time-code seed or a refresh token. Every decision is written to a hash-chained audit log.
