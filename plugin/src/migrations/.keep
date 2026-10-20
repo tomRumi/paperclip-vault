@@ -1,0 +1,1 @@
+Intentionally empty: Paperclip requires a migrations folder when a plugin reads core tables (public.heartbeat_runs); this plugin creates no tables. Only *.sql files are migrations.

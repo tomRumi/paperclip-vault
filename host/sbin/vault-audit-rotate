@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# vault-audit-rotate: monthly audit-log retention (INSTALL.md step 6, automated). Runs as root from vault-audit-rotate.timer.
+#  1. stop vaultd, lift +a, mv audit.jsonl -> audit-<UTC rotation time>.jsonl, recreate the live file 0600 vault:vault (vault-helper is in group vault and must not read it; the vaultaudit ACL is the only other reader),
+#     check the vaultaudit ACL (mask r--), +a, start vaultd. vaultd is started again on EVERY exit path (trap), the live file is
+#     recreated first if missing, and every audit file gets +a again.
+#  2. gzip every rotated audit-*.jsonl except the newest one (+a lifted on that one file only while compressing, set again on the .gz;
+#     the .gz keeps the data's mtime). The newest rotated file stays plain so chain recovery and an external chain check always have
+#     an uncompressed link.
+#  3. delete rotated files older than 12 months (365 days by mtime).
+# SAFETY: /var/log/vault must be owned by root (not group/other-writable) so the vault user cannot plant symlinks while root works
+# there (vaultd only appends to the existing live file; it never needs to create files in the directory). The script refuses to
+# run otherwise, and refuses if any audit* path is a symlink. Never reads secrets. Exit non-zero if any step failed (after vaultd
+# is back up). Usage: vault-audit-rotate [--dry-run]
+set -euo pipefail
+umask 077
+D=${VAULT_AUDIT_DIR:-/var/log/vault}
+LIVE=$D/audit.jsonl
+KEEP_DAYS=${VAULT_AUDIT_KEEP_DAYS:-365}
+DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
+OWNER=${VAULT_AUDIT_DIR_OWNER:-root}      # tests only
+rc=0
+stopped=0
+log() { echo "vault-audit-rotate: $*"; }
+fail() { log "ERROR: $*" >&2; rc=1; }
+
+acl_ok() {       # the vaultaudit group must be able to read, and the effective mask must be r--
+  local out; out=$(getfacl -p -c "$1" 2>/dev/null) || return 1
+  grep -qx 'group:vaultaudit:r--' <<<"$out" && grep -qx 'mask::r--' <<<"$out"
+}
+
+restore() {      # runs on every exit: never leave vaultd stopped or any audit file without +a
+  local e=$?
+  trap - EXIT
+  if [ $stopped -eq 1 ] && [ ! -e "$LIVE" ] && [ ! -L "$LIVE" ]; then      # vaultd must find the live file (it cannot create it)
+    install -o vault -g vault -m 0600 /dev/null "$LIVE" && { acl_ok "$LIVE" || setfacl -m g:vaultaudit:r,m::r "$LIVE"; } || e=1
+  fi
+  find "$D" -maxdepth 1 -type f \( -name 'audit.jsonl' -o -name 'audit-*.jsonl' -o -name 'audit-*.jsonl.gz' \) -exec chattr +a {} + 2>/dev/null || true
+  if [ $stopped -eq 1 ]; then systemctl start vaultd || { echo "vault-audit-rotate: FAILED TO START vaultd" >&2; e=1; }; fi
+  if [ $e -eq 0 ] && [ $rc -ne 0 ]; then e=$rc; fi
+  exit $e
+}
+trap restore EXIT
+
+[ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
+[ -d "$D" ] && [ ! -L "$D" ] || { echo "$D missing or a symlink" >&2; exit 1; }
+[ "$(stat -c %U "$D")" = "$OWNER" ] && [ $(( 0$(stat -c %a "$D") & 0022 )) -eq 0 ] || {
+  echo "$D must be owned by $OWNER and not group/other-writable (chown root:vault $D; chmod 0750 $D)" >&2; exit 1; }
+[ -z "$(find "$D" -maxdepth 1 -type l -name 'audit*' -print -quit)" ] || { echo "symlink among the audit files in $D: refusing" >&2; exit 1; }
+[ ! -L "$LIVE" ] || { echo "$LIVE is a symlink" >&2; exit 1; }
+
+# ---- 1. rotate ----
+if [ -s "$LIVE" ]; then
+  target=$D/audit-$(date -u +%Y-%m-%dT%H%M%SZ).jsonl            # rotation time; sorts oldest first
+  if [ -e "$target" ] || [ -e "$target.gz" ]; then
+    fail "$target(.gz) already exists: not rotating"
+  elif [ $DRY -eq 1 ]; then
+    log "dry-run: would rotate $LIVE -> $target"
+  else
+    stopped=1; systemctl stop vaultd
+    chattr -a "$LIVE"
+    if mv -n "$LIVE" "$target" && [ ! -e "$LIVE" ] && [ -s "$target" ]; then
+      install -o vault -g vault -m 0600 /dev/null "$LIVE"      # default ACL on the directory gives the vaultaudit entry
+      acl_ok "$LIVE" || setfacl -m g:vaultaudit:r,m::r "$LIVE"
+      acl_ok "$LIVE" || fail "ACL of the new $LIVE is wrong (need group:vaultaudit:r-- and mask::r--)"
+      chattr +a "$target"
+      log "rotated to $target"
+    else
+      fail "mv failed; live log left in place"
+    fi
+    chattr +a "$LIVE"
+    systemctl start vaultd; stopped=0
+    systemctl is-active --quiet vaultd || fail "vaultd is not active after the rotation"
+  fi
+else
+  log "live log empty or missing: nothing to rotate"
+fi
+
+# ---- 2. compress all rotated files except the newest ----
+mapfile -t plain < <(find "$D" -maxdepth 1 -type f -name 'audit-????-??-??T??????Z.jsonl' | LC_ALL=C sort)
+if [ ${#plain[@]} -gt 1 ] && [ $DRY -eq 0 ]; then
+  for f in "${plain[@]:0:${#plain[@]}-1}"; do
+    if [ -e "$f.gz" ]; then fail "$f.gz already exists: skipping $f"; continue; fi
+    tmp=$(mktemp -p "$D" audit-gz.XXXXXX)                       # O_EXCL, root-owned, in a root-owned directory
+    chattr -a "$f"
+    if gzip -9 -n -c "$f" > "$tmp" && gzip -t "$tmp" && cmp -s <(zcat "$tmp") "$f" \
+       && chown vault:vault "$tmp" && chmod 0600 "$tmp" && setfacl -m g:vaultaudit:r,m::r "$tmp" && touch -r "$f" "$tmp" \
+       && mv -n "$tmp" "$f.gz" && [ ! -e "$tmp" ] && cmp -s <(zcat "$f.gz") "$f"; then
+      chattr +a "$f.gz" && rm -f "$f" && log "compressed $f"
+    else
+      rm -f "$tmp"; fail "compressing $f failed; original kept"
+    fi
+    [ ! -e "$f" ] || chattr +a "$f"
+  done
+elif [ ${#plain[@]} -gt 1 ]; then
+  for f in "${plain[@]:0:${#plain[@]}-1}"; do log "dry-run: would gzip $f"; done
+fi
+
+# ---- 3. retention ----
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [ $DRY -eq 1 ]; then log "dry-run: would delete $f"; continue; fi
+  { chattr -a "$f" && rm -f "$f" && log "deleted $f (older than $KEEP_DAYS days)"; } || fail "could not delete $f"
+done < <(find "$D" -maxdepth 1 -type f \( -name 'audit-????-??-??T??????Z.jsonl' -o -name 'audit-????-??-??T??????Z.jsonl.gz' \) -mtime +"$KEEP_DAYS")
+exit 0

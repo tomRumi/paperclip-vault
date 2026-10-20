@@ -1,0 +1,81 @@
+# Installed to /etc/systemd/system/vault-helper.service by install-vault.sh, which replaces @NODE@ with the root-owned Node it
+# found or vendored (never a Node under a user's home). Paths follow /opt/vault, /etc/vault, /var/lib/vault-helper.
+# The helper runs headless Chromium for logins, so it is hardened as far as Chromium allows. Every relaxation against the
+# vaultd.service template is commented where it is made.
+[Unit]
+Description=vault-helper (site logins, OAuth, sealed session store)
+# Chromium reaches the sites, so unlike vaultd this unit wants the network.
+Wants=network-online.target
+After=local-fs.target network-online.target
+
+[Service]
+User=vault-helper
+Group=vault-helper
+# vault: read /etc/vault (helper.json, helper.token, sites/) and own the group of helper.sock so vaultd can connect.
+SupplementaryGroups=vault
+# Decrypts /etc/credstore.encrypted/vault-helper.* (site logins, TOTP seeds, store key) into $CREDENTIALS_DIRECTORY (tmpfs, this
+# unit only). vault.* (vaultd's secrets) never reach this unit.
+ImportCredential=vault-helper.*
+# The admin token of the root CLI (vault-site) is root:root 0600 on disk; PID 1 reads it and hands this unit a copy, so the
+# helper account can compare tokens without being able to read the file. helper.json points adminTokenFile at this path.
+LoadCredential=helper-admin.token:/etc/vault/helper-admin.token
+ExecStart=@NODE@ /opt/vault/helper/main.js --config /etc/vault/helper.json
+WorkingDirectory=/opt/vault/helper
+# HOME and the XDG dirs: Chromium and Playwright need a writable home; everything lives in the state directory.
+Environment=HOME=/var/lib/vault-helper XDG_CONFIG_HOME=/var/lib/vault-helper/.config XDG_CACHE_HOME=/var/lib/vault-helper/.cache
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/vault-helper/browsers NODE_ENV=production
+Restart=always
+RestartSec=2
+# 0711: vaultd (user vault) must traverse /run/vault-helper to reach helper.sock (0660 vault-helper:vault); vnc.pw inside is 0600.
+RuntimeDirectory=vault-helper
+RuntimeDirectoryMode=0711
+StateDirectory=vault-helper
+StateDirectoryMode=0700
+# Three browsers at most (helper.json maxBrowsers); Chromium forks many processes and threads.
+TasksMax=512
+MemoryMax=1G
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+# Explicit although StateDirectory= is writable already: browsers, profiles, sealed store and leases live here.
+ReadWritePaths=/var/lib/vault-helper
+ProtectHome=yes
+# PrivateTmp holds the X11 filesystem socket of the Xvfb the helper starts for interactive logins, but it does not hide abstract sockets: Xvfb runs with -nolisten tcp -nolisten local and a per-session -auth cookie (Xvfb, x11vnc and Chromium are its children).
+PrivateTmp=yes
+# The private /dev still has /dev/shm, which Chromium needs.
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+# Not set, unlike vaultd: ProcSubset=pid. Chromium reads a few /proc/sys entries when it starts its sandbox.
+ProtectProc=invisible
+RemoveIPC=yes
+# Not set, unlike vaultd: PrivateIPC=yes. Xvfb and the interactive Chromium share X11 memory through SysV IPC.
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Relaxed against vaultd (RestrictNamespaces=yes): Chromium's own sandbox builds user, pid and network namespaces.
+# Without this it could only run with --no-sandbox. mount and uts namespaces stay forbidden.
+RestrictNamespaces=user pid net
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Not set, unlike vaultd: MemoryDenyWriteExecute=yes. V8 (Chromium and Node) needs writable and executable memory for its JIT.
+# Relaxed against vaultd (AF_UNIX only): Chromium and the sites need IP; AF_NETLINK is how Chromium lists network interfaces.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# No cloud metadata or link-local services (169.254.0.0/16, fe80::/10); the sites are reached by their own addresses.
+IPAddressDeny=link-local
+# Relaxed against vaultd (which denies @privileged and @resources): Chromium's sandbox calls chroot, setresuid, setgroups and
+# capset inside its own new user namespace, so @privileged (and @mount, which holds chroot) stay allowed. This does not grant
+# privilege: NoNewPrivileges=yes and the empty capability set below mean these calls can only act on the browser's own
+# namespaces. The groups below remain denied.
+SystemCallFilter=@system-service
+SystemCallFilter=~@swap @reboot @module @raw-io @obsolete @cpu-emulation @debug
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

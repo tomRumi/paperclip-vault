@@ -1,0 +1,13 @@
+# Installed to /etc/systemd/system/ by install-vault.sh (see INSTALL.md step 6). Script is root-owned in /opt/vault/sbin.
+[Unit]
+Description=vaultd audit log rotation, compression and retention
+Wants=vaultd.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vault/sbin/vault-audit-rotate
+TimeoutStartSec=300
+Nice=10
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

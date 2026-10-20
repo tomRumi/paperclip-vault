@@ -1,0 +1,11 @@
+# Installed to /etc/systemd/system/ by install-vault.sh (see INSTALL.md step 6).
+[Unit]
+Description=Monthly vaultd audit log rotation
+
+[Timer]
+OnCalendar=*-*-01 00:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

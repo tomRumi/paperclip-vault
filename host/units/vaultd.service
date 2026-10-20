@@ -1,0 +1,62 @@
+# Installed to /etc/systemd/system/vaultd.service by install-vault.sh. Paths follow /opt/vault, /etc/vault, /var/lib/vault.
+[Unit]
+Description=vaultd credential broker
+# No network: vaultd talks only to Unix sockets (the plugin's plugin.sock, the helper's helper.sock).
+After=local-fs.target vaultd.socket
+# plugin.sock comes from vaultd.socket (socket activation); vaultd takes the listening socket from systemd.
+Requires=vaultd.socket
+
+[Service]
+User=vault
+Group=vault
+# Decrypts /etc/credstore.encrypted into $CREDENTIALS_DIRECTORY (tmpfs, only this unit). vault.* are the static grantable
+# secrets; site passwords are vault-helper.* and never reach this unit.
+ImportCredential=vault.*
+ExecStart=/usr/bin/python3 -s -m vaultd serve --config /etc/vault/config.json
+WorkingDirectory=/opt/vault
+Environment=PYTHONPATH=/opt/vault PYTHONDONTWRITEBYTECODE=1 PYTHON_JIT=0
+Restart=always
+RestartSec=2
+# 0711: the Paperclip service user must traverse /run/vault to reach plugin.sock (0600 vault:vault plus an ACL entry for that
+# user, see vaultd.socket); admin.sock is 0600. Preserved when the service stops: plugin.sock belongs to vaultd.socket and must survive.
+RuntimeDirectory=vault
+RuntimeDirectoryMode=0711
+RuntimeDirectoryPreserve=yes
+StateDirectory=vault
+StateDirectoryMode=0700
+TasksMax=64
+MemoryMax=256M
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/log/vault
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+PrivateIPC=yes
+RemoveIPC=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# CPython runs without W^X violations with the JIT off (PYTHON_JIT=0 above); tested on 3.14.4.
+MemoryDenyWriteExecute=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

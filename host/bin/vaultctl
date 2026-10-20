@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""vaultctl status | leases | revoke LEASE | unlock AGENT | company add|rm UUID | verify-audit [--allow-partial] FILE...
+Talks to vaultd on /run/vault/admin.sock (root or the vault user only). verify-audit reads files and needs no socket;
+give the files oldest first (rotated audit-*.jsonl and audit-*.jsonl.gz both work)."""
+import json, os, socket, sys
+
+SOCK = os.environ.get("VAULT_ADMIN_SOCKET", "/run/vault/admin.sock")
+USAGE = __doc__
+
+
+def ask(msg):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.connect(SOCK)
+        s.sendall((json.dumps(msg) + "\n").encode())
+        return json.loads(s.makefile().readline())
+
+
+def main(argv):
+    if not argv:
+        sys.exit(USAGE)
+    cmd, args = argv[0], argv[1:]
+    if cmd == "verify-audit":
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        from vaultd import audit
+        partial = "--allow-partial" in args
+        files = [a for a in args if a != "--allow-partial"]
+        if not files:
+            sys.exit(USAGE)
+        ok, msg = audit.verify(files, from_genesis=not partial)
+        print(msg)
+        return 0 if ok else 1
+    if cmd in ("status", "leases") and not args:
+        msg = {"cmd": cmd}
+    elif cmd == "revoke" and len(args) == 1:
+        msg = {"cmd": cmd, "lease": args[0]}
+    elif cmd == "unlock" and len(args) == 1:
+        msg = {"cmd": cmd, "agent": args[0]}
+    elif cmd == "company" and len(args) == 2 and args[0] in ("add", "rm"):
+        msg = {"cmd": cmd, "action": args[0], "id": args[1]}
+    else:
+        sys.exit(USAGE)
+    reply = ask(msg)
+    print(json.dumps(reply, indent=2))
+    return 0 if reply.get("ok") else 1
+
+
+sys.exit(main(sys.argv[1:]))

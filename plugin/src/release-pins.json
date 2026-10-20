@@ -1,0 +1,6 @@
+{
+  "comment": "Written by scripts/release.sh for a release build. All null in a development checkout: the Install tab then shows no install command.",
+  "version": null,
+  "baseUrl": null,
+  "installVaultSha256": null
+}

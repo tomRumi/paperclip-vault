@@ -1,0 +1,15 @@
+{
+  "name": "paperclip-vault-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Login helper for paperclip-vault: headless Chromium logins, sealed session store.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

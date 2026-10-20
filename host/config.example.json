@@ -1,0 +1,17 @@
+{
+  "plugin_uid": 1001,
+  "allowed_company_ids": [],
+  "policy_path": "/etc/vault/policy.json",
+  "sites_dir": "/etc/vault/sites",
+  "enrol_path": "/etc/vault/enrol.json",
+  "plugin_socket": "/run/vault/plugin.sock",
+  "admin_socket": "/run/vault/admin.sock",
+  "helper_socket": "/run/vault-helper/helper.sock",
+  "helper_token_path": "/etc/vault/helper.token",
+  "audit_path": "/var/log/vault/audit.jsonl",
+  "db_path": "/var/lib/vault/vault.db",
+  "key_path": "/var/lib/vault/plugin-key.json",
+  "verdict_timeout_s": 180,
+  "max_concurrency": 32,
+  "handler_timeout": 10
+}

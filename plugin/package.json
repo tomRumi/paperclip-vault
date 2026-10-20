@@ -1,0 +1,49 @@
+{
+  "name": "paperclip-vault",
+  "version": "0.1.0",
+  "description": "Paperclip plugin for the vault credential broker: agent tools to request short web-login sessions and tokens, the verdict provider that asks a language model whether a request is justified, and the admin actions for enrolment, sites and the judge-test gate. All ceilings, leases and the audit log live in vaultd.",
+  "type": "module",
+  "license": "MIT",
+  "author": "tomRumi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomRumi/paperclip-vault.git",
+    "directory": "plugin"
+  },
+  "homepage": "https://github.com/tomRumi/paperclip-vault#readme",
+  "bugs": {
+    "url": "https://github.com/tomRumi/paperclip-vault/issues"
+  },
+  "os": [
+    "linux"
+  ],
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "keywords": [
+    "paperclip",
+    "paperclip-plugin",
+    "credentials",
+    "vault",
+    "security",
+    "ai-agents"
+  ],
+  "scripts": {
+    "validate-manifest": "node ./scripts/validate-manifest.mjs",
+    "test": "node --test test/*.test.js test/*.test.mjs"
+  },
+  "paperclipPlugin": {
+    "manifest": "./src/manifest.js",
+    "worker": "./src/worker.js",
+    "ui": "./src/ui.js"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "2026.1012.0",
+    "@paperclipai/shared": "2026.1012.0"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "README.md"
+  ]
+}

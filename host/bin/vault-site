@@ -1,0 +1,629 @@
+#!/usr/bin/env python3
+"""vault-site: the owner's tool for the sites agents may log in to. Root only (install-vault.sh puts a wrapper in /usr/local/sbin).
+
+  vault-site add (--site-json-b64 B64 | --site-file FILE) [--no-totp] [--no-test] [--replace]
+  vault-site remove ID [--keep-creds]
+  vault-site list
+  vault-site test ID [--attended]
+  vault-site authorize ID [--redirect PORT]
+  vault-site interactive ID
+  vault-site import-session ID --file STATE.json
+
+Global options (before the command): --prefix DIR  fake root for tests (no root check, no chown/systemctl, "would run: ..." lines).
+`add` asks for the secrets on the terminal (the username is echoed, the password is asked twice, the TOTP seed is hidden) and pipes
+each one on stdin into `systemd-creds encrypt` (never argv, never a temp file); `--stdin-secrets` reads them as one JSON object
+from stdin instead, for tests. Nothing secret is printed, with one exception by design: `interactive` prints the one-time VNC
+password of the login session it starts, to the root terminal that asked for it (it protects only that short-lived session, which
+the helper closes on its own). Talks to the helper on helper.sock with /etc/vault/helper-admin.token (every root-only operation
+uses that token; the helper account cannot read the file, systemd hands the helper a copy).
+Secrets entered here are never in argv or in a temp file; the credential blobs this tool makes are recorded in /etc/vault/installed-by
+(so that install-vault.sh --uninstall --purge removes them with the vault it installed)."""
+import argparse
+import base64
+import binascii
+import getpass
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from vaultd import sites as sitelib  # noqa: E402  (the root-owned copy in /opt/vault, validated by the same rules as the daemons)
+
+MAX_SITE_BYTES = 24 * 1024
+MAX_STATE_BYTES = 6 * 1024 * 1024          # below the helper's 8 MiB request limit
+SECRET_PARTS = {"password-totp": ("username", "password", "totp"), "interactive": (), "oauth": ("oauth-client-secret",)}
+CRED_PREFIX = "vault-helper.site."
+
+
+class Fail(Exception):
+    """An expected failure: printed as one line, exit status 1."""
+
+
+class Paths:
+    def __init__(self, prefix):
+        self.prefix = prefix
+        self.etc = prefix + "/etc/vault"
+        self.sites = self.etc + "/sites"
+        self.cred = prefix + "/etc/credstore.encrypted"
+        self.helper_sock = prefix + "/run/vault-helper/helper.sock"
+        self.admin_sock = prefix + "/run/vault/admin.sock"
+        self.admin_token = self.etc + "/helper-admin.token"
+
+    def site_file(self, site_id):
+        return os.path.join(self.sites, site_id + ".json")
+
+    def cred_file(self, site_id, part):
+        return os.path.join(self.cred, "%s%s.%s" % (CRED_PREFIX, site_id, part))
+
+
+class Env:
+    def __init__(self, paths, stdin_secrets):
+        self.p = paths
+        self.prefix = paths.prefix
+        self._stdin = None
+        self.stdin_secrets = stdin_secrets
+        key = os.environ.get("VAULT_CREDS_KEY", "") if self.prefix else ""
+        if key not in ("", "null", "host"):
+            raise Fail("VAULT_CREDS_KEY must be null or host")
+        self.creds_key = key or "host"
+
+    # ---- system changes: real commands, or "would run" lines in a --prefix test run
+    def run(self, argv, check=True):
+        if self.prefix:
+            print("would run: " + " ".join(argv).replace(self.prefix, ""))
+            return 0
+        rc = subprocess.run(argv).returncode
+        if check and rc != 0:
+            raise Fail("%s failed (exit %d)" % (argv[0], rc))
+        return rc
+
+    def chown(self, path, owner="root:vault"):
+        self.run(["chown", owner, path])
+
+    # ---- secrets on the terminal, or one JSON object on stdin (tests)
+    def _stdin_dict(self):
+        if self._stdin is None:
+            try:
+                self._stdin = json.load(sys.stdin)
+            except ValueError:
+                raise Fail("--stdin-secrets: stdin must be one JSON object")
+            if not isinstance(self._stdin, dict):
+                raise Fail("--stdin-secrets: stdin must be one JSON object")
+        return self._stdin
+
+    def ask(self, name, prompt, hidden=True, confirm=False, required=True):
+        if self.stdin_secrets:
+            v = self._stdin_dict().get(name)
+            if v is None or v == "":
+                if required:
+                    raise Fail("--stdin-secrets: key %r missing" % name)
+                return None
+            return str(v)
+        if not sys.stdin.isatty():
+            raise Fail("this needs a terminal to ask for %s (run it in an interactive shell, not through a pipe)" % name)
+        while True:
+            v = getpass.getpass(prompt + ": ") if hidden else input(prompt + ": ")
+            if confirm and v:
+                if getpass.getpass(prompt + " (again): ") != v:
+                    print("the two entries differ, try again", file=sys.stderr)
+                    continue
+            if v or not required:
+                return v or None
+            print("%s may not be empty" % name, file=sys.stderr)
+
+    def yes_no(self, name, question):
+        """y/N, default no."""
+        if self.stdin_secrets:
+            return str(self._stdin_dict().get(name, "n")).strip().lower() in ("y", "yes")
+        if not sys.stdin.isatty():
+            raise Fail("this needs a terminal to ask: %s" % question)
+        return input(question + " [y/N] ").strip().lower() in ("y", "yes")
+
+    def pause(self, message):
+        if self.stdin_secrets:
+            return
+        if not sys.stdin.isatty():
+            raise Fail("this needs a terminal")
+        input(message)
+
+    # ---- encrypted credentials: root encrypts (host key), PID 1 decrypts for the unit
+    def encrypt(self, site_id, part, secret):
+        name = "%s%s.%s" % (CRED_PREFIX, site_id, part)
+        dest = self.p.cred_file(site_id, part)
+        if self.prefix and not os.environ.get("VAULT_CREDS_KEY"):
+            print("would run: systemd-creds encrypt --with-key=%s --name=%s - /etc/credstore.encrypted/%s" % (self.creds_key, name, name))
+            return None
+        exe = shutil.which("systemd-creds")
+        if exe is None:
+            raise Fail("systemd-creds not found")
+        os.makedirs(self.p.cred, mode=0o700, exist_ok=True)
+        old = os.umask(0o077)
+        try:
+            r = subprocess.run([exe, "encrypt", "--with-key=" + self.creds_key, "--name=" + name, "-", dest],
+                               input=secret.encode(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        finally:
+            os.umask(old)
+        if r.returncode != 0:
+            lines = r.stderr.decode(errors="replace").strip().splitlines()
+            raise Fail("systemd-creds could not encrypt the %s: %s" % (part, lines[-1] if lines else "failed"))
+        os.chmod(dest, 0o600)
+        self.record("cred:" + name)
+        return dest
+
+    def record(self, line):
+        """Append to the install manifest (install-vault.sh --purge removes only what it lists); not when there is none."""
+        path = self.p.etc + "/installed-by"
+        try:
+            with open(path) as f:
+                if line in f.read().split("\n"):
+                    return
+            with open(path, "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    # ---- the helper (root-only ops use the admin token) and vaultd's admin socket
+    def helper(self, op, timeout=90, **params):
+        try:
+            with open(self.p.admin_token) as f:
+                token = f.read().strip()
+        except OSError:
+            raise Fail("cannot read the helper admin token %s (is the vault installed?)" % self.p.admin_token.replace(self.prefix, ""))
+        reply = line_call(self.p.helper_sock, dict(params, op=op, token=token), timeout)
+        if not reply.get("ok"):
+            err = reply.get("error") or {}
+            raise HelperError(err.get("code", "error"), err.get("message", ""))
+        return reply.get("data") or {}
+
+    def helper_up(self):
+        return os.path.exists(self.p.helper_sock)
+
+    def wait_helper(self, seconds=30):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            try:
+                s = socket.socket(socket.AF_UNIX)
+                s.connect(self.p.helper_sock)
+                s.close()
+                return True
+            except OSError:
+                time.sleep(0.5)
+        return False
+
+    def admin(self, cmd):
+        return line_call(self.p.admin_sock, cmd, 15)
+
+    def write_site(self, site):
+        path = self.p.site_file(site["id"])
+        tmp = path + ".new"
+        os.makedirs(self.p.sites, exist_ok=True)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o640)
+        with os.fdopen(fd, "w") as f:
+            json.dump(site, f, indent=2)
+            f.write("\n")
+        os.chmod(tmp, 0o640)
+        os.replace(tmp, path)
+        self.chown(path)
+
+
+class HelperError(Fail):
+    def __init__(self, code, message):
+        super().__init__("the helper answered %s: %s" % (code, message) if message else "the helper answered %s" % code)
+        self.code = code
+        self.detail = message
+
+
+# What the owner should do about the helper's error codes that have a next step. {id} is the site id.
+HINTS = {
+    "needs_authorize": "{id} is not authorized, or the provider rejected the stored authorization: run  sudo vault-site authorize {id}",
+    "oauth_denied": "the authorization of {id} was denied at the provider: run  sudo vault-site authorize {id}  again and approve it",
+    "oauth_error": "the OAuth provider of {id} answered with an error: check the client id and secret, the URLs and the scopes in the site file, then run  sudo vault-site authorize {id}",
+    "dependency_missing": "a program the interactive login needs is not installed on this host: run  sudo apt-get install xvfb x11vnc  (or install them with your package manager) and try again",
+    "needs_interactive": "{id} needs a login by hand (a CAPTCHA, or no stored session yet): run  sudo vault-site interactive {id}  (or import-session)",
+    "needs_owner_ack": "{id} has no logout step and you have not accepted that yet: run  sudo vault-site interactive {id}  and answer y to the question",
+}
+
+
+def explain(err, site_id):
+    """The one-line message for a helper error: the next step if there is one, always with the helper's code and words."""
+    hint = HINTS.get(err.code)
+    if hint is None:
+        return str(err)
+    detail = " (the helper answered %s%s)" % (err.code, ": " + err.detail if err.detail else "")
+    return hint.format(id=site_id or "ID") + detail
+
+
+def line_call(path, msg, timeout):
+    """One request line, one response line (the framing of all the sockets)."""
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(timeout)
+    try:
+        s.connect(path)
+        s.sendall((json.dumps(msg) + "\n").encode())
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    except (OSError, socket.timeout) as e:
+        raise Fail("cannot talk to %s: %s" % (os.path.basename(path), e.strerror or "timed out"))
+    finally:
+        s.close()
+    try:
+        return json.loads(buf)
+    except ValueError:
+        raise Fail("%s sent an unreadable answer" % os.path.basename(path))
+
+
+# ------------------------------------------------------------------------------------------------ helpers
+def load_site(env, site_id):
+    if not sitelib.ID_RE.match(site_id):
+        raise Fail("not a valid site id: ^[a-z0-9][a-z0-9-]{0,40}$")
+    try:
+        with open(env.p.site_file(site_id)) as f:
+            return sitelib.validate(json.load(f))
+    except FileNotFoundError:
+        raise Fail("no site %s (vault-site list)" % site_id)
+    except (ValueError, sitelib.SiteError) as e:
+        raise Fail("site file %s is invalid: %s" % (site_id, e))
+
+
+def ssh_hint(port, remote_port=None):
+    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "USER"
+    host = socket.getfqdn() or "HOST"
+    return "ssh -L %d:127.0.0.1:%d %s@%s" % (port, remote_port or port, user, host)
+
+
+def normalize_totp(seed):
+    s = re.sub(r"[\s-]", "", seed).upper().rstrip("=")
+    if len(s) < 16 or not re.fullmatch(r"[A-Z2-7]+", s):
+        raise Fail("the TOTP seed must be a base32 string of at least 16 characters (the 'setup key' the site shows next to its QR code)")
+    try:
+        base64.b32decode(s + "=" * (-len(s) % 8))
+    except (binascii.Error, ValueError):
+        raise Fail("the TOTP seed is not valid base32")
+    return s
+
+
+def clean_secret(name, v):
+    if not v or len(v) > 1024 or any(ord(c) < 32 or ord(c) == 127 for c in v):
+        raise Fail("the %s is empty, longer than 1024 characters, or holds control characters" % name)
+    return v
+
+
+def summary(site):
+    print("site %s (%s): %s" % (site["id"], site["type"], site["displayName"]))
+    print("  kind %s, purpose: %s" % (site["kind"], site["purpose"]))
+    print("  allowed hosts: %s" % ", ".join(site["allowedHosts"]))
+    if site.get("loginUrl"):
+        print("  login: %s, logout: %s" % (site["loginUrl"], site.get("logoutUrl") or ("recipe" if site.get("recipe", {}).get("logout") else "none")))
+    if site.get("oauth"):
+        print("  oauth: %s flow, client %s, scopes %s" % (site["oauth"]["flow"], site["oauth"]["clientId"], " ".join(site["oauth"]["scopes"])))
+    print("  agents: %d allowed, roles: %s, at most %d minutes" % (len(site["allowedAgents"]), ", ".join(site["roles"]) or "none listed", site["maxMinutes"]))
+
+
+def has_logout(site):
+    r = site.get("recipe") or {}
+    return bool(site.get("logoutUrl")) or bool((r.get("logout") or {}).get("steps"))
+
+
+# ------------------------------------------------------------------------------------------------ commands
+def cmd_add(env, a):
+    if a.site_json_b64:
+        try:
+            raw = base64.b64decode(a.site_json_b64, validate=True)
+        except (binascii.Error, ValueError):
+            raise Fail("--site-json-b64 is not valid base64")
+    else:
+        with open(a.site_file, "rb") as f:
+            raw = f.read(MAX_SITE_BYTES + 1)
+    if len(raw) > MAX_SITE_BYTES:
+        raise Fail("the site file is larger than 24 KiB")
+    try:
+        site = sitelib.validate(json.loads(raw))
+    except (ValueError, sitelib.SiteError) as e:
+        raise Fail("the site file is invalid: %s" % e)
+    sid = site["id"]
+    if os.path.exists(env.p.site_file(sid)) and not a.replace:
+        raise Fail("site %s exists already (vault-site remove %s first, or add --replace)" % (sid, sid))
+    summary(site)
+
+    secrets = {}
+    if site["type"] == "password-totp":
+        secrets["username"] = clean_secret("username", env.ask("username", "username", hidden=False))
+        secrets["password"] = clean_secret("password", env.ask("password", "password", confirm=True))
+        if not a.no_totp:
+            secrets["totp"] = normalize_totp(env.ask("totp", "TOTP seed (base32 setup key)"))
+    elif site["type"] == "oauth":
+        v = env.ask("oauth-client-secret", "OAuth client secret (Enter for none)", required=False)
+        if v:
+            secrets["oauth-client-secret"] = clean_secret("client secret", v)
+
+    made, parts = [], list(secrets)
+    try:
+        for part, value in secrets.items():
+            dest = env.encrypt(sid, part, value)
+            if dest:
+                made.append(dest)
+        env.write_site(site)
+    except BaseException:
+        for dest in made:
+            try:
+                os.unlink(dest)
+            except OSError:
+                pass
+        raise
+    secrets.clear()
+    print("stored credentials for %s: %s; wrote %s" % (sid, ", ".join(parts) or "none needed", env.p.site_file(sid).replace(env.prefix, "")))
+    env.run(["systemctl", "restart", "vault-helper.service"])
+    if site["type"] == "interactive":
+        print("next: sudo vault-site interactive %s    (log in once in a browser the helper starts)" % sid)
+    elif site["type"] == "oauth":
+        print("next: sudo vault-site authorize %s    (approve the access once)" % sid)
+    if a.no_test or site["type"] != "password-totp":
+        return 0
+    if env.prefix and not env.helper_up():
+        print("login test skipped (no helper socket in this prefix)")
+        return 0
+    if not env.prefix and not env.wait_helper():
+        print("the helper did not come up; the site is stored. Check: journalctl -u vault-helper; then: sudo vault-site test %s" % sid, file=sys.stderr)
+        return 1
+    return run_test(env, sid, False)
+
+
+def run_test(env, sid, attended):
+    r = env.helper("site.test", timeout=180, siteId=sid, attended=attended)
+    if r.get("state") == "challenge":
+        print("the site asks for a verification code (sent by e-mail or SMS, or shown by an authenticator).")
+        code = env.ask("code", "verification code", hidden=False)
+        r = env.helper("challenge.submit", timeout=180, handle=r["handle"], code=code)
+    if r.get("state") == "ok":
+        print("login test for %s passed (logged out again: %s)" % (sid, r.get("loggedOut")))
+        return 0
+    print("login test for %s did not pass: %s" % (sid, json.dumps(r)), file=sys.stderr)
+    return 1
+
+
+def cmd_test(env, a):
+    load_site(env, a.id)
+    try:
+        return run_test(env, a.id, a.attended)
+    except HelperError as e:
+        if e.code == "challenge_required":
+            print("the site wants a verification code: run  sudo vault-site test %s --attended" % a.id, file=sys.stderr)
+        raise
+
+
+def cmd_remove(env, a):
+    site = load_site(env, a.id)
+    target = ("oauth-" if site["type"] == "oauth" else "web-") + a.id
+    # 1. leases of this site end first, while the credentials still exist (the helper logs out with them)
+    if os.path.exists(env.p.admin_sock):
+        try:
+            reply = env.admin({"cmd": "leases"})
+            for lease in (reply.get("leases") or []):
+                if lease.get("target") == target:
+                    env.admin({"cmd": "revoke", "lease": lease["leaseId"]})
+                    print("revoked lease %s" % lease["leaseId"])
+        except Fail as e:
+            print("warning: could not revoke leases: %s" % e, file=sys.stderr)
+    else:
+        print("note: vaultd's admin socket is missing, so no leases were revoked", file=sys.stderr)
+    # 2. the helper forgets its sealed trust/oauth/session store and profile
+    if env.helper_up():
+        try:
+            env.helper("site.forget", siteId=a.id)
+            print("the helper forgot the stored state of %s" % a.id)
+        except Fail as e:
+            print("warning: the helper could not forget %s: %s" % (a.id, e), file=sys.stderr)
+    else:
+        print("the helper is not running here: its stored state for %s is wiped on the next remove, or by deleting /var/lib/vault-helper/store" % a.id, file=sys.stderr)
+    # 3. files
+    if not a.keep_creds:
+        for part in ("username", "password", "totp", "oauth-client-secret"):
+            try:
+                os.unlink(env.p.cred_file(a.id, part))
+            except FileNotFoundError:
+                pass
+    os.unlink(env.p.site_file(a.id))
+    print("removed site %s%s" % (a.id, " (credentials kept)" if a.keep_creds else ""))
+    env.run(["systemctl", "restart", "vault-helper.service"])
+    return 0
+
+
+def cmd_list(env, a):
+    found, errors = sitelib.load_all(env.p.sites)
+    if not found and not errors:
+        print("no sites yet; add one with the Sites tab of the plugin or: sudo vault-site add --site-file FILE")
+    for sid, s in sorted(found.items()):
+        want = SECRET_PARTS[s["type"]]
+        have = [p for p in want if os.path.exists(env.p.cred_file(sid, p))]
+        missing = [p for p in want if p not in have and not (p == "totp" or p == "oauth-client-secret")]
+        creds = "credentials ok" if not missing else "missing: " + ", ".join(missing)
+        print("%-24s %-14s %-9s %-30s agents %-3d %s" % (sid, s["type"], s["kind"], ",".join(s["allowedHosts"])[:30], len(s["allowedAgents"]), creds))
+    for name, err in sorted(errors.items()):
+        print("%-24s INVALID: %s" % (name, err))
+    return 1 if errors else 0
+
+
+def port_of(listen, default):
+    if isinstance(listen, int):
+        return listen
+    if isinstance(listen, dict):
+        return int(listen.get("port", default or 0)) or None
+    m = re.search(r":(\d+)$", str(listen or ""))
+    return int(m.group(1)) if m else default
+
+
+OAUTH_WAIT_DEFAULT = 15 * 60       # seconds, when the helper names no lifetime
+OAUTH_WAIT_MAX = 30 * 60           # a device code may live this long, never more
+OAUTH_WAIT_SLACK = 30              # the helper answers a moment after the code expires
+
+
+def oauth_wait(start_reply, now=None):
+    """How long oauth.finish may take: the lifetime of the code or redirect that oauth.start returned (`expires_in` seconds, or
+    `expiresAt` as the helper sends it), plus a little slack, at most 30 minutes."""
+    life = None
+    for key in ("expires_in", "expiresIn"):
+        v = start_reply.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            life = float(v)
+            break
+    if life is None and isinstance(start_reply.get("expiresAt"), str):
+        m = re.match(r"^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", start_reply["expiresAt"])
+        if m:
+            import calendar
+            life = calendar.timegm(tuple(int(g) for g in m.groups()) + (0, 0, 0)) - (time.time() if now is None else now)
+    if life is None or life <= 0:
+        return OAUTH_WAIT_DEFAULT
+    return int(min(life + OAUTH_WAIT_SLACK, OAUTH_WAIT_MAX))
+
+
+def cmd_authorize(env, a):
+    site = load_site(env, a.id)
+    if site["type"] != "oauth":
+        raise Fail("%s is not an oauth site" % a.id)
+    flow = site["oauth"]["flow"]
+    if a.redirect is not None and flow != "redirect":
+        raise Fail("--redirect belongs to sites with the redirect flow")
+    params = {"siteId": a.id, "flow": flow}
+    if a.redirect is not None:
+        params["port"] = a.redirect
+    r = env.helper("oauth.start", **params)
+    if flow == "device":
+        print("Open  %s  on any device and enter the code:  %s" % (r.get("verificationUri"), r.get("userCode")))
+        print("Waiting until you have confirmed the code at the provider (the helper polls it)...")
+    else:
+        port = port_of(r.get("listen"), a.redirect)
+        print("The helper listens on 127.0.0.1:%s for the provider's redirect (10 minutes, one use)." % port)
+        print("On your laptop, forward the port, then open the link in your browser:")
+        print("  %s" % ssh_hint(port))
+        print("  %s" % r.get("authUrl"))
+        print("Waiting for the redirect...")
+    done = env.helper("oauth.finish", timeout=oauth_wait(r), handle=r["handle"])
+    print("authorized %s%s" % (a.id, (": scopes " + " ".join(done["scopes"])) if isinstance(done.get("scopes"), list) else ""))
+    return 0
+
+
+def cmd_interactive(env, a):
+    site = load_site(env, a.id)
+    if site["type"] != "interactive":
+        raise Fail("%s is not an interactive site" % a.id)
+    if not has_logout(site) and not site.get("acceptNoLogout"):
+        print("This site has no logout step. A lease cannot end the session you are about to create: the agent receives a COPY of")
+        print("your logged-in session that stays valid at the site after the lease ends, until the site expires it or you log out")
+        print("yourself. Revoking a lease deletes the file, not that copy.")
+        if not env.yes_no("acceptNoLogout", "Accept this for %s?" % a.id):
+            raise Fail("not accepted: no login was started. Add a logout step to the site file, or run this again and answer y.")
+        site["acceptNoLogout"] = True
+        env.write_site(site)
+        print("recorded acceptNoLogout in the site file")
+        env.helper("site.reload")          # the helper reads the site files at start: tell it about the change now
+    r = env.helper("interactive.start", siteId=a.id, minutes=15)
+    port = int(r.get("vncPort", 5900))
+    print("A browser is waiting for you on the host (display %s). It closes in 15 minutes." % r.get("display"))
+    print("1. On your laptop run:   %s" % ssh_hint(5900, port))
+    print("2. Connect a VNC viewer to  localhost:5900  with this one-time password:  %s" % r.get("vncPassword"))
+    print("3. Log in to %s completely (second factor included), then come back here." % site["displayName"])
+    env.pause("Press Enter when you are logged in... ")
+    done = env.helper("interactive.finish", timeout=120, siteId=a.id)
+    print("login stored for %s%s" % (a.id, (" (%s cookies)" % done["cookies"]) if "cookies" in done else ""))
+    return 0
+
+
+def cmd_import(env, a):
+    site = load_site(env, a.id)
+    if site["type"] != "interactive":
+        raise Fail("%s is not an interactive site" % a.id)
+    with open(a.file, "rb") as f:
+        raw = f.read(MAX_STATE_BYTES + 1)
+    if len(raw) > MAX_STATE_BYTES:
+        raise Fail("the session file is larger than 6 MiB")
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        raise Fail("the session file is not JSON (expected a Playwright storageState)")
+    if not isinstance(state, dict) or not isinstance(state.get("cookies"), list) or not state["cookies"]:
+        raise Fail("the session file needs a non-empty 'cookies' list (a Playwright storageState)")
+    if not has_logout(site) and not site.get("acceptNoLogout"):
+        raise Fail("this site has no logout step: run  sudo vault-site interactive %s  once to read and accept the limit" % a.id)
+    r = env.helper("session.import", siteId=a.id, storageState=state)
+    print("imported the session for %s (%s cookies)" % (a.id, r.get("cookies", len(state["cookies"]))))
+    return 0
+
+
+def parser():
+    # The two global options work before and after the command name (the sub-parsers only set them when given).
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--prefix", default=argparse.SUPPRESS, help="fake root for tests")
+    common.add_argument("--stdin-secrets", action="store_true", default=argparse.SUPPRESS, help="read secrets as one JSON object from stdin (tests)")
+    p = argparse.ArgumentParser(prog="vault-site", description=__doc__.split("\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--prefix", default="", help="fake root for tests")
+    p.add_argument("--stdin-secrets", action="store_true", help="read secrets as one JSON object from stdin (tests)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("add", parents=[common])
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--site-json-b64")
+    g.add_argument("--site-file")
+    s.add_argument("--no-totp", action="store_true")
+    s.add_argument("--no-test", action="store_true")
+    s.add_argument("--replace", action="store_true")
+    s = sub.add_parser("remove", parents=[common])
+    s.add_argument("id")
+    s.add_argument("--keep-creds", action="store_true")
+    sub.add_parser("list", parents=[common])
+    s = sub.add_parser("test", parents=[common])
+    s.add_argument("id")
+    s.add_argument("--attended", action="store_true")
+    s = sub.add_parser("authorize", parents=[common])
+    s.add_argument("id")
+    s.add_argument("--redirect", type=int, metavar="PORT")
+    s = sub.add_parser("interactive", parents=[common])
+    s.add_argument("id")
+    s = sub.add_parser("import-session", parents=[common])
+    s.add_argument("id")
+    s.add_argument("--file", required=True)
+    return p
+
+
+COMMANDS = {"add": cmd_add, "remove": cmd_remove, "list": cmd_list, "test": cmd_test, "authorize": cmd_authorize,
+            "interactive": cmd_interactive, "import-session": cmd_import}
+
+
+def main(argv):
+    a = parser().parse_args(argv)
+    prefix = a.prefix
+    if prefix:
+        if not prefix.startswith("/"):
+            print("vault-site: --prefix must be an absolute path", file=sys.stderr)
+            return 2
+        prefix = os.path.normpath(prefix).replace("//", "/")      # normpath keeps a leading "//"
+        if prefix == "/":
+            print("vault-site: --prefix must not be / (it would not be a fake root)", file=sys.stderr)
+            return 2
+    elif os.geteuid() != 0:
+        print("vault-site: run this with sudo (root only)", file=sys.stderr)
+        return 1
+    try:
+        env = Env(Paths(prefix), a.stdin_secrets)
+        return COMMANDS[a.cmd](env, a)
+    except HelperError as e:
+        print("vault-site: %s" % explain(e, getattr(a, "id", None)), file=sys.stderr)
+        return 1
+    except Fail as e:
+        print("vault-site: %s" % e, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nvault-site: interrupted", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

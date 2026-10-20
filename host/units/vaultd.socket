@@ -1,0 +1,24 @@
+# Installed to /etc/systemd/system/vaultd.socket by install-vault.sh, which replaces @SVC@ with the account Paperclip runs as.
+# plugin.sock is created by systemd and handed to vaultd (socket activation, fd 3). The socket is 0600 vault:vault; the service
+# user gets read and write through a POSIX ACL entry for that one user (setfacl, package acl), so it needs no group membership:
+# no new login session and no Paperclip restart. vaultd still checks SO_PEERCRED (uid == plugin_uid) and the Ed25519 signature
+# on every message, so the ACL only decides who may connect.
+[Unit]
+Description=vaultd plugin socket (the Paperclip plugin connects here)
+Before=vaultd.service
+
+[Socket]
+ListenStream=/run/vault/plugin.sock
+SocketUser=vault
+SocketGroup=vault
+SocketMode=0600
+# /run/vault is created by this unit if it is not there yet: traversable (0711) so the service user can reach plugin.sock;
+# vaultd.service then takes it over (RuntimeDirectory=vault, same mode). admin.sock inside is 0600.
+DirectoryMode=0711
+ExecStartPost=/usr/bin/setfacl -m u:@SVC@:rw /run/vault/plugin.sock
+Service=vaultd.service
+Accept=no
+Backlog=64
+
+[Install]
+WantedBy=sockets.target

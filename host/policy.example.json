@@ -1,0 +1,141 @@
+{
+  "_comment": "agents pins each agent UUID to a role; the role is shown to the gatekeeper as is, so use the role names the judge prompt knows (Engineer, QA, UI Tester, Architect, Designer, Researcher, Data Scientist, Business Analyst, Coordinator, Triage Clerk). Ceilings use ONLY this pin, never a role reported by Paperclip or the plugin; an agent not listed here is denied (agent_unpinned). Replace the placeholder UUIDs with your agents' ids. Names starting 'vault' are never grantable (hard-coded); 'never' adds more globs. Every request is decided by the gatekeeper after the ceilings: there is no class that skips it. Requests must state minutes; there is no default. Each class has a hard maximum, max_minutes (60 when not set, never above 480), narrow_minutes is the lease cap for the gatekeeper's 'allow narrow' (30 when not set); a site file's maxMinutes can only lower the maximum further. A request above the maximum is denied (minutes_over_max), not shortened. A class 'match' is a glob or a list of globs; web-<site> credentials (site files, /etc/vault/sites) fall under web-login and oauth-<site> under oauth-token. Each site file also lists allowedAgents, the hard per-site ceiling. The Security role has no classes.",
+  "agents": {
+    "00000000-0000-4000-8000-000000000001": "Engineer",
+    "00000000-0000-4000-8000-000000000002": "QA",
+    "00000000-0000-4000-8000-000000000003": "UI Tester",
+    "00000000-0000-4000-8000-000000000004": "Architect",
+    "00000000-0000-4000-8000-000000000005": "Designer",
+    "00000000-0000-4000-8000-000000000006": "Researcher",
+    "00000000-0000-4000-8000-000000000007": "Data Scientist",
+    "00000000-0000-4000-8000-000000000008": "Business Analyst",
+    "00000000-0000-4000-8000-000000000009": "Coordinator",
+    "00000000-0000-4000-8000-000000000010": "Triage Clerk",
+    "00000000-0000-4000-8000-000000000011": "Security"
+  },
+  "never": [
+    "openrouter*",
+    "*admin*",
+    "*prod-deploy*",
+    "deploy-prod*"
+  ],
+  "roles": {
+    "Engineer": [
+      "github",
+      "github-read",
+      "api-key",
+      "model-api",
+      "ci-trigger"
+    ],
+    "QA": [
+      "github-read",
+      "ci-trigger",
+      "web-login"
+    ],
+    "UI Tester": [
+      "github-read",
+      "ci-trigger",
+      "web-login"
+    ],
+    "Architect": [
+      "github-read"
+    ],
+    "Designer": [
+      "github-read",
+      "web-login"
+    ],
+    "Researcher": [
+      "github-read",
+      "api-key",
+      "model-api",
+      "web-login"
+    ],
+    "Data Scientist": [
+      "github-read",
+      "api-key",
+      "model-api",
+      "web-login"
+    ],
+    "Business Analyst": [
+      "github-read",
+      "oauth-token",
+      "web-login"
+    ],
+    "Coordinator": [
+      "github-read",
+      "ci-trigger",
+      "oauth-token",
+      "web-login"
+    ],
+    "Triage Clerk": [
+      "github-read"
+    ],
+    "Security": []
+  },
+  "classes": {
+    "github-read": {
+      "match": "github-ro-*",
+      "description": "Read-only fine-grained GitHub token for one repo.",
+      "max_minutes": 480,
+      "scopes": [
+        "contents:read"
+      ],
+      "narrow_minutes": 30
+    },
+    "github": {
+      "match": "github-*",
+      "description": "Fine-grained GitHub token for one repo.",
+      "max_minutes": 480,
+      "scopes": [
+        "contents:read",
+        "contents:write",
+        "pull_requests:write"
+      ],
+      "narrow_minutes": 30
+    },
+    "api-key": {
+      "match": "api-*",
+      "description": "Third-party API key.",
+      "scopes": [
+        "use"
+      ],
+      "narrow_minutes": 10
+    },
+    "model-api": {
+      "match": "model-*",
+      "description": "Model API key for agent inference.",
+      "max_minutes": 120,
+      "scopes": [
+        "inference"
+      ],
+      "narrow_minutes": 30
+    },
+    "ci-trigger": {
+      "match": "ci-*",
+      "description": "Signed CI-failure webhook secret for one project.",
+      "max_minutes": 30,
+      "scopes": [
+        "use"
+      ],
+      "narrow_minutes": 10
+    },
+    "web-login": {
+      "match": "web-*",
+      "description": "Browser session for a site the owner configured (vault-site add); the password never leaves the helper.",
+      "max_minutes": 60,
+      "scopes": [
+        "use"
+      ],
+      "narrow_minutes": 30
+    },
+    "oauth-token": {
+      "match": "oauth-*",
+      "description": "Short-lived OAuth access token for a site the owner authorized; the refresh token never leaves the helper.",
+      "max_minutes": 60,
+      "scopes": [
+        "use"
+      ],
+      "narrow_minutes": 30
+    }
+  }
+}
