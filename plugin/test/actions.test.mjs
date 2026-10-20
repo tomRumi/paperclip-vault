@@ -187,7 +187,7 @@ test("enrol-tick completes the enrolment with the key being enrolled and clears 
     assert.equal(install.kid, w.key.kid);
     const call = w.fake.calls.find((c) => c.type === "enrol");
     assert.equal(call.data.publicKey, w.key.publicKeyB64);
-    assert.equal(call.data.pluginVersion, "0.1.0");
+    assert.equal(call.data.pluginVersion, "0.1.1");
     // from now on signed calls work
     assert.equal((await w.action("vaultStatus", {}, user(USER))).vaultd.reachable, true);
     assert.ok(w.c.activity.some((e) => /enrolled with vaultd/.test(e.message)));
@@ -250,7 +250,7 @@ test("runJudgeTests: runs the reachable scenarios x3 with k samples, posts the r
     const res = await w.tool("vault_request_login", { site: "example-admin", reason: "Check the admin UI for ticket 12", minutes: 30 });
     assert.equal(res.data.status, "ready", JSON.stringify(res));
 
-    const gate = (await w.action("gatekeeperStatus", {}, user(USER))).gate;
+    const gate = (await w.action("judgeStatus", {}, user(USER))).gate;
     assert.equal(gate.cleared, true);
     const status = await w.action("judgeTestStatus", {}, user(USER));
     assert.equal(status.records[0].current, true);
@@ -295,14 +295,14 @@ test("changing k invalidates the judge result; runJudgeTests needs a configured 
   try {
     await w.action("runJudgeTests", { model: "good-model" }, user(ADMIN));
     await w.services.judge.whenIdle();
-    w.data.config[COMPANY].gatekeeper.k = 3;
+    w.data.config[COMPANY].judge.k = 3;
     await assert.rejects(w.action("selectModel", { model: "good-model" }, user(ADMIN)), /no clean judge-test result/);
   } finally { await w.cleanup(); }
-  const n = await makeWorld({ overrides: { providerFor: () => { throw Object.assign(new Error("the gatekeeper base URL is missing"), { code: "not_configured" }); } } });
+  const n = await makeWorld({ overrides: { providerFor: () => { throw Object.assign(new Error("the judge base URL is missing"), { code: "not_configured" }); } } });
   try {
     await assert.rejects(n.action("runJudgeTests", { model: "m" }, user(ADMIN)), /base URL/);
     await assert.rejects(n.action("refreshModels", {}, user(ADMIN)), /base URL/);
-    assert.equal((await n.action("gatekeeperStatus", {}, user(USER))).gate.cleared, false);
+    assert.equal((await n.action("judgeStatus", {}, user(USER))).gate.cleared, false);
   } finally { await n.cleanup(); }
 });
 
@@ -321,12 +321,12 @@ test("a run left over from a previous worker is marked interrupted; vaultd failu
   } finally { fs.rmSync(w.root, { recursive: true, force: true }); }
 });
 
-test("refreshModels stores the provider's list; gatekeeperStatus never returns the key reference or the key", async () => {
-  const w = await makeWorld({ provider: stub(goodJudge), config: { gatekeeper: { baseUrl: "https://openrouter.ai/api/v1", apiKey: { type: "secret_ref", secretId: "77777777-7777-4777-8777-777777777777" }, k: 2 } } });
+test("refreshModels stores the provider's list; judgeStatus never returns the key reference or the key", async () => {
+  const w = await makeWorld({ provider: stub(goodJudge), config: { judge: { baseUrl: "https://openrouter.ai/api/v1", apiKey: { type: "secret_ref", secretId: "77777777-7777-4777-8777-777777777777" }, k: 2 } } });
   try {
     const m = await w.action("refreshModels", {}, user(ADMIN));
     assert.deepEqual(m.models.map((x) => x.id), ["good-model", "other-model"]);
-    const st = await w.action("gatekeeperStatus", {}, user(USER));
+    const st = await w.action("judgeStatus", {}, user(USER));
     assert.equal(st.configured, true);
     assert.equal(st.endpoint, "openrouter.ai");
     assert.equal(st.keyConfigured, true);
@@ -336,26 +336,26 @@ test("refreshModels stores the provider's list; gatekeeperStatus never returns t
   } finally { await w.cleanup(); }
 });
 
-test("gatekeeperStatus and config validation refuse plain http to a non-loopback host", async () => {
-  const w = await makeWorld({ config: { gatekeeper: { baseUrl: "http://gpu-box.example:11434/v1", k: 2 } } });
+test("judgeStatus and config validation refuse plain http to a non-loopback host", async () => {
+  const w = await makeWorld({ config: { judge: { baseUrl: "http://gpu-box.example:11434/v1", k: 2 } } });
   try {
-    const st = await w.action("gatekeeperStatus", {}, user(USER));
+    const st = await w.action("judgeStatus", {}, user(USER));
     assert.equal(st.configured, false);
     assert.equal(st.endpoint, null);
     assert.match(st.configProblem, /plain http.*not loopback/);
   } finally { await w.cleanup(); }
-  const ok = await makeWorld({ config: { gatekeeper: { baseUrl: "http://127.0.0.1:11434/v1", k: 2 } } });
+  const ok = await makeWorld({ config: { judge: { baseUrl: "http://127.0.0.1:11434/v1", k: 2 } } });
   try {
-    const st = await ok.action("gatekeeperStatus", {}, user(USER));
+    const st = await ok.action("judgeStatus", {}, user(USER));
     assert.equal(st.configured, true);
     assert.equal(st.configProblem, null);
   } finally { await ok.cleanup(); }
   const { default: plugin } = await import("../src/worker.js");
-  const bad = await plugin.definition.onValidateConfig({ gatekeeper: { baseUrl: "http://gpu-box.example/v1" } });
+  const bad = await plugin.definition.onValidateConfig({ judge: { baseUrl: "http://gpu-box.example/v1" } });
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0], /plain http/);
-  assert.deepEqual(await plugin.definition.onValidateConfig({ gatekeeper: { baseUrl: "http://localhost:11434/v1" } }), { ok: true });
-  assert.deepEqual(await plugin.definition.onValidateConfig({ gatekeeper: { baseUrl: "https://openrouter.ai/api/v1" } }), { ok: true });
+  assert.deepEqual(await plugin.definition.onValidateConfig({ judge: { baseUrl: "http://localhost:11434/v1" } }), { ok: true });
+  assert.deepEqual(await plugin.definition.onValidateConfig({ judge: { baseUrl: "https://openrouter.ai/api/v1" } }), { ok: true });
   assert.deepEqual(await plugin.definition.onValidateConfig({}), { ok: true });
 });
 

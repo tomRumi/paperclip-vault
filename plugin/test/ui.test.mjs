@@ -620,13 +620,13 @@ test("page: a failed action is shown plainly", { skip: skipRender }, async () =>
   } finally { await w.cleanup(); }
 });
 
-test("page: Gatekeeper tab: provider, gate, model list, select only with a clean record, run the judge tests with progress", { skip: skipRender }, async () => {
+test("page: Judge tab: provider, gate, model list, select only with a clean record, run the judge tests with progress", { skip: skipRender }, async () => {
   fakeIntervals();
   let release = null;
-  const w = await world({ config: { gatekeeper: { baseUrl: "http://127.0.0.1:11434/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 } } });
+  const w = await world({ config: { judge: { baseUrl: "http://127.0.0.1:11434/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 } } });
   try {
     const v = await openPage(w);
-    await v.click("Gatekeeper");
+    await v.click("Judge");
     let t = v.text();
     assert.match(t, /\[ok: Connected to 127\.0\.0\.1:11434\]/);
     assert.match(t, /No API key \(fine for a local Ollama\)/);
@@ -673,14 +673,14 @@ test("page: Gatekeeper tab: provider, gate, model list, select only with a clean
   } finally { release?.(); restoreIntervals(); await w.cleanup(); }
 });
 
-test("page: Gatekeeper: a model that failed the tests cannot be selected, a non-admin has nothing to press, an unconfigured provider says what to set", { skip: skipRender }, async () => {
-  const w = await world({ config: { gatekeeper: { baseUrl: "http://127.0.0.1:11434/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 } } });
+test("page: Judge: a model that failed the tests cannot be selected, a non-admin has nothing to press, an unconfigured provider says what to set", { skip: skipRender }, async () => {
+  const w = await world({ config: { judge: { baseUrl: "http://127.0.0.1:11434/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 } } });
   const w2 = await world();
   try {
     await w.services.state.records.put("fake:provider|good-model", { model: "good-model", provider: "fake:provider", k: 2, promptSha256: PROMPT_SHA, scenariosSha256: SCENARIOS_SHA, metrics: { n: 6, injection_granted: 1, over_grants: 0, stability: 1, parse_failures_pct: 0 }, clean: false, at: "2026-10-19T08:00:00Z" });
     await w.services.state.setModels({ fetchedAt: "2026-10-19T08:00:00Z", provider: "fake:provider", models: [{ id: "good-model" }] });
     const v = await openPage(w);
-    await v.click("Gatekeeper");
+    await v.click("Judge");
     assert.match(v.text(), /\[error: did not pass\]/);
     assert.match(v.text(), /injection requests granted: 1 \(must be 0\) FAILS/);
     const select = v.all((n) => n.type === "button" && n.children.join("") === "Select")[0];
@@ -689,15 +689,15 @@ test("page: Gatekeeper: a model that failed the tests cannot be selected, a non-
     v.dispose();
 
     const p = await openPage(w, USER);
-    await p.click("Gatekeeper");
+    await p.click("Judge");
     assert.match(p.text(), /Only admins can change the vault/);
     for (const label of ["Load model list from provider", "Run judge tests", "Select"]) assert.equal(p.all((n) => n.type === "button" && n.children.join("") === label).every((b) => b.props.disabled), true, label);
     p.dispose();
 
-    w2.data.config[COMPANY].gatekeeper = { baseUrl: "", k: 2 };
+    w2.data.config[COMPANY].judge = { baseUrl: "", k: 2 };
     const u = await openPage(w2);
-    await u.click("Gatekeeper");
-    assert.match(u.text(), /The provider is not set up\. Open this plugin's settings and fill in the Gatekeeper base URL/);
+    await u.click("Judge");
+    assert.match(u.text(), /The provider is not set up\. Open this plugin's settings and fill in the Judge base URL/);
     u.dispose();
   } finally { await w.cleanup(); await w2.cleanup(); }
 });

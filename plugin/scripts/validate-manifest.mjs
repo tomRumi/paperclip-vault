@@ -14,7 +14,7 @@ if (!r.success) { console.error(JSON.stringify(r.error.issues, null, 2)); proces
 const problems = [];
 for (const f of [manifest.entrypoints.worker, manifest.entrypoints.ui]) if (!fs.existsSync(path.join(root, f))) problems.push(`entrypoint ${f} does not exist`);
 if (!fs.statSync(path.join(root, manifest.database.migrationsDir), { throwIfNoEntry: false })?.isDirectory()) problems.push("migrations folder does not exist");
-if (manifest.instanceConfigSchema.properties.gatekeeper?.properties?.apiKey?.format !== "secret-ref") problems.push("gatekeeper.apiKey must have format secret-ref");
+if (manifest.instanceConfigSchema.properties.judge?.properties?.apiKey?.format !== "secret-ref") problems.push("judge.apiKey must have format secret-ref");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 if (pkg.paperclipPlugin?.manifest !== "./src/manifest.js") problems.push("package.json paperclipPlugin.manifest must point to ./src/manifest.js");
 if (pkg.version !== manifest.version) problems.push(`package.json version ${pkg.version} differs from the manifest version ${manifest.version}`);

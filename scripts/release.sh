@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # release.sh: build the release assets (publishes nothing).
 #
-#   scripts/release.sh --version 0.1.0 [--org <github account>] [--base-url URL] [--out DIR]
+#   scripts/release.sh --version 0.1.1 [--org <github account>] [--base-url URL] [--out DIR]
 #
 # Writes into --out (default ./dist, kept out of git):
 #   paperclip-vault-host-<version>.tar.gz   /opt/vault content: vaultd, helper (with its production node_modules from

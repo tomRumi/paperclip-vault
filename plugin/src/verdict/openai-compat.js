@@ -12,7 +12,7 @@
 import { VERDICT_SCHEMA, parseSample } from "./aggregate.js";
 
 export const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,119}$/;
-export const API_KEY_CONFIG_PATH = "gatekeeper.apiKey";
+export const API_KEY_CONFIG_PATH = "judge.apiKey";
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_MODELS = 2000;
 
@@ -20,7 +20,7 @@ export class ProviderError extends Error {
   constructor(code, message) { super(message); this.name = "ProviderError"; this.code = code; }
 }
 
-/** True for localhost, 127.0.0.0/8 and ::1 (the only hosts the gatekeeper may be reached at over plain http). */
+/** True for localhost, 127.0.0.0/8 and ::1 (the only hosts the judge may be reached at over plain http). */
 export function isLoopbackHost(hostname) {
   const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, "");
   if (h === "localhost" || h === "::1") return true;
@@ -28,15 +28,15 @@ export function isLoopbackHost(hostname) {
   return Boolean(m) && m.slice(1).every((o) => Number(o) <= 255);
 }
 
-/** Why `value` cannot be the gatekeeper base URL, as a message for the admin; null when it is usable. Empty is "not set". */
+/** Why `value` cannot be the judge base URL, as a message for the admin; null when it is usable. Empty is "not set". */
 export function baseUrlProblem(value) {
-  if (typeof value !== "string" || !value.trim()) return "the gatekeeper base URL is not set";
+  if (typeof value !== "string" || !value.trim()) return "the judge base URL is not set";
   let u;
-  try { u = new URL(value.trim()); } catch { return "the gatekeeper base URL is not a valid URL"; }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return "the gatekeeper base URL must start with https:// (or http:// for a loopback host)";
-  if (u.username || u.password || u.search || u.hash) return "the gatekeeper base URL must not contain credentials, a query or a fragment";
+  try { u = new URL(value.trim()); } catch { return "the judge base URL is not a valid URL"; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "the judge base URL must start with https:// (or http:// for a loopback host)";
+  if (u.username || u.password || u.search || u.hash) return "the judge base URL must not contain credentials, a query or a fragment";
   if (u.protocol === "http:" && !isLoopbackHost(u.hostname)) {
-    return "the gatekeeper base URL uses plain http to a host that is not loopback (127.0.0.0/8, ::1, localhost); the API key and the prompts would cross the network unencrypted. Use https://";
+    return "the judge base URL uses plain http to a host that is not loopback (127.0.0.0/8, ::1, localhost); the API key and the prompts would cross the network unencrypted. Use https://";
   }
   return null;
 }
@@ -86,9 +86,9 @@ export function createOpenAiCompat(cfg, ctx, { fetch: fetchFn = globalThis.fetch
     if (!cfg.apiKey) return null;
     let key;
     try { key = await ctx.secrets.resolve(cfg.apiKey, { companyId: cfg.companyId, configPath: API_KEY_CONFIG_PATH }); }
-    catch { throw new ProviderError("secret", "the gatekeeper API key could not be read from the Paperclip secrets"); }
+    catch { throw new ProviderError("secret", "the judge API key could not be read from the Paperclip secrets"); }
     key = typeof key === "string" ? key.trim() : "";
-    if (!key) throw new ProviderError("secret", "the gatekeeper API key secret is empty");
+    if (!key) throw new ProviderError("secret", "the judge API key secret is empty");
     return key;
   }
 
@@ -117,7 +117,7 @@ export function createOpenAiCompat(cfg, ctx, { fetch: fetchFn = globalThis.fetch
       outcome = e?.name === "TimeoutError" || e?.name === "AbortError" ? "timeout" : e instanceof SyntaxError ? "bad_response" : e?.code === "too_large" ? "too_large" : "network";
       return failedSample(outcome);
     } finally {
-      if (outcome) log.warn("gatekeeper call failed", { provider: id, model, outcome });
+      if (outcome) log.warn("judge call failed", { provider: id, model, outcome });
     }
   }
 
@@ -126,10 +126,10 @@ export function createOpenAiCompat(cfg, ctx, { fetch: fetchFn = globalThis.fetch
     const key = await resolveKey();
     let res;
     try { res = await fetchFn(`${baseUrl}/models`, { method: "GET", headers: headers(key, false), signal: signalFor(signal) }); }
-    catch { throw new ProviderError("network", "the gatekeeper endpoint could not be reached"); }
+    catch { throw new ProviderError("network", "the judge endpoint could not be reached"); }
     let json;
     try {
-      if (!res.ok) throw new ProviderError("http", `the gatekeeper endpoint answered HTTP ${res.status}`);
+      if (!res.ok) throw new ProviderError("http", `the judge endpoint answered HTTP ${res.status}`);
       json = JSON.parse(await readCapped(res));
     } catch (e) {
       if (e instanceof ProviderError) throw e;

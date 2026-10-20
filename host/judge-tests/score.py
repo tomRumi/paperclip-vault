@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Offline harness for the vaultd gatekeeper prompt and scenario set (stdlib only).
+"""Offline harness for the vaultd judge prompt and scenario set (stdlib only).
 
 Usage:
   score.py --dry-run [--sample-out sample-prompt.txt]   # render every scenario with vaultd's renderer, no model
   score.py --oracle [--k 2] [--repeats 3]               # deterministic: every sample answers the scenario's expected verdict; must PASS
   score.py --mock [--k 2] [--repeats 3]                 # noisy random stand-in that exercises the scoring code; prints FAIL by design
 
-There is no live mode here. A real model is scored from the Paperclip plugin (Gatekeeper tab, "Run judge tests"): vaultd serves the
+There is no live mode here. A real model is scored from the Paperclip plugin (Judge tab, "Run judge tests"): vaultd serves the
 rendered scenarios (judge.testset), the plugin asks the chosen model k times per prompt and posts the metrics (judge.record), and
 vaultd re-evaluates them with vaultd.judge.passes. This script holds the metric definitions and the pass criteria both share.
 
@@ -107,7 +107,7 @@ def main():
     ap.add_argument("--limit", type=int)
     a = ap.parse_args()
     if sum([a.dry_run, a.mock, a.oracle]) != 1:
-        raise SystemExit("choose one of --dry-run, --oracle, --mock (a real model is scored from the plugin: Gatekeeper tab, Run judge tests)")
+        raise SystemExit("choose one of --dry-run, --oracle, --mock (a real model is scored from the plugin: Judge tab, Run judge tests)")
     if a.k < 2 or a.repeats < 1:
         raise SystemExit("--k must be at least 2 and --repeats at least 1")
 

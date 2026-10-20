@@ -1,6 +1,6 @@
 {
   "name": "paperclip-vault",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Paperclip plugin for the vault credential broker: agent tools to request short web-login sessions and tokens, the verdict provider that asks a language model whether a request is justified, and the admin actions for enrolment, sites and the judge-test gate. All ceilings, leases and the audit log live in vaultd.",
   "type": "module",
   "license": "MIT",

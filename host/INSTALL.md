@@ -7,7 +7,7 @@ the helper's credentials are not covered. Run as root. Paths match `units/vaultd
 0. Stage and verify. Never install from a directory the Paperclip user can write. The host bundle is the release asset
    `paperclip-vault-host-<version>.tar.gz`; compare its SHA-256 with the one in the release notes (an anchor you obtained separately from the download).
    ```
-   v=0.1.0; base=https://github.com/tomRumi/paperclip-vault/releases/download/v$v
+   v=0.1.1; base=https://github.com/tomRumi/paperclip-vault/releases/download/v$v
    sudo install -d -m 0755 -o root -g root /opt/paperclip-vault-src && cd /opt/paperclip-vault-src
    sudo curl -fsSL -O "$base/paperclip-vault-host-$v.tar.gz" -O "$base/SHA256SUMS"
    sudo sha256sum -c --ignore-missing SHA256SUMS
@@ -67,7 +67,7 @@ the helper's credentials are not covered. Run as root. Paths match `units/vaultd
    The plugin's Install tab shows the command that creates the enrolment record; the plugin completes the enrolment within the hour.
    Admin: `vaultctl status|leases|revoke LEASE|unlock AGENT|company add|rm UUID` (the socket `/run/vault/admin.sock` is 0600 vault, so root
    or vault only; peers are also checked with SO_PEERCRED).
-5. Judge records: in the plugin's Gatekeeper tab choose a model and run the judge tests. vaultd accepts verdicts only from a
+5. Judge records: in the plugin's Judge tab choose a model and run the judge tests. vaultd accepts verdicts only from a
    (model, provider) with a clean record for the current prompt and scenario file; a prompt change voids all records.
 6. Monthly rotation that keeps the chain (the log is `+a`, so lift it briefly). Stop vaultd for
    the swap so no record is written between the `mv` and the `install` (requests fail closed meanwhile):

@@ -20,11 +20,11 @@ def scenarios():
 
 
 def scenario_ceiling(policy, scn):
-    """The ceiling code a scenario meets in production ('' = it reaches the gatekeeper), under the model the beyond_ceiling tags
+    """The ceiling code a scenario meets in production ('' = it reaches the judge), under the model the beyond_ceiling tags
     use: the policy pins each scenario agent to its role, and every web-/oauth- site file lists as allowedAgents all agents whose
-    role holds the web-login/oauth-token class (the site's `roles` text is the gatekeeper's rule 10 to enforce, not a ceiling).
+    role holds the web-login/oauth-token class (the site's `roles` text is the judge's rule 10 to enforce, not a ceiling).
     'scope' = the scenario asks for a scope text outside the class scopes, which vaultd never sends (it derives the scope
-    from the class), so such a request cannot reach the gatekeeper."""
+    from the class), so such a request cannot reach the judge."""
     r = scn["request"]
     agents = {s["request"]["agent_id"]: s["request"]["role"] for s in scenarios()}
     pol = Policy(dict(policy_data(policy), agents=agents))

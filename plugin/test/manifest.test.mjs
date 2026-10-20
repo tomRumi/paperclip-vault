@@ -18,7 +18,7 @@ test("the manifest satisfies the host's own schema", () => {
 
 test("validate-manifest.mjs passes", () => {
   const out = execFileSync(process.execPath, [new URL("../scripts/validate-manifest.mjs", import.meta.url).pathname], { encoding: "utf8" });
-  assert.match(out, /manifest OK: paperclip-vault 0.1.0/);
+  assert.match(out, /manifest OK: paperclip-vault 0.1.1/);
 });
 
 test("package.json: SDK and shared pinned to the host version, paperclipPlugin key, scripts", () => {
@@ -48,12 +48,12 @@ test("jobs, tools and the config schema", () => {
   assert.deepEqual(manifest.jobs.map((j) => j.jobKey).sort(), ["enrol-tick", "lease-sweep"]);
   assert.ok(manifest.jobs.every((j) => j.schedule === "* * * * *"));
   const props = manifest.instanceConfigSchema.properties;
-  assert.deepEqual(Object.keys(props).sort(), ["adminUserIds", "agentHomeRoot", "dataDir", "gatekeeper", "instanceRoot", "sandboxExtraPaths", "socketPath", "toolWaitMs", "workspaceRoots"]);
+  assert.deepEqual(Object.keys(props).sort(), ["adminUserIds", "agentHomeRoot", "dataDir", "instanceRoot", "judge", "sandboxExtraPaths", "socketPath", "toolWaitMs", "workspaceRoots"]);
   assert.equal(manifest.instanceConfigSchema.additionalProperties, false);
-  assert.equal(props.gatekeeper.properties.apiKey.format, "secret-ref");
-  assert.deepEqual(Object.keys(props.gatekeeper.properties).sort(), ["apiKey", "baseUrl", "k", "perCallTimeoutMs", "temperature"]);
-  assert.equal(props.gatekeeper.properties.k.minimum, 2);
-  assert.equal(props.gatekeeper.properties.k.default, 2);
+  assert.equal(props.judge.properties.apiKey.format, "secret-ref");
+  assert.deepEqual(Object.keys(props.judge.properties).sort(), ["apiKey", "baseUrl", "k", "perCallTimeoutMs", "temperature"]);
+  assert.equal(props.judge.properties.k.minimum, 2);
+  assert.equal(props.judge.properties.k.default, 2);
   assert.equal(props.toolWaitMs.default, 7000);
   for (const t of manifest.tools) {
     assert.equal(t.parametersSchema.type, "object");

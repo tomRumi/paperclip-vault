@@ -74,7 +74,7 @@ test("the secret is resolved for every call, with company and config path, and n
     const r1 = await p.judge({ prompt: PROMPT, model: "m", k: 2 });
     await p.judge({ prompt: PROMPT, model: "m", k: 2 });
     assert.equal(resolved.length, 2, "one resolve per judge call, never cached");
-    assert.deepEqual(resolved[0].opts, { companyId: "c1", configPath: "gatekeeper.apiKey" });
+    assert.deepEqual(resolved[0].opts, { companyId: "c1", configPath: "judge.apiKey" });
     assert.deepEqual(resolved[0].ref, cfg(s.baseUrl).apiKey);
     assert.ok(logs.length >= 2);
     const everything = JSON.stringify([logs, r1]);

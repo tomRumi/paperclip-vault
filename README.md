@@ -9,7 +9,7 @@ request that passes those limits, and a login helper that runs outside every age
 file with a browser session or a short-lived access token that stops working when the lease ends; it never sees the password, the
 one-time-code seed or a refresh token. Every decision is written to a hash-chained audit log.
 
-No person decides individual requests: the ceilings are set once by the owner, and the gatekeeper decides inside them.
+No person decides individual requests: the ceilings are set once by the owner, and the judge decides inside them.
 
 ## What it protects
 
@@ -18,16 +18,16 @@ No person decides individual requests: the ceilings are set once by the owner, a
 * Leases are short. The requester states the minutes; a hard maximum per credential class and per site is checked in code, and a request above it is denied.
   At the end of a lease the helper logs out where the site supports it and the plugin removes the file.
 * A request has to pass, in this order: the agent is pinned to a role by the owner, the role may use that kind of credential,
-  the site lists that agent, the loop guards allow it, and only then does the gatekeeper see it. The gatekeeper can lower
+  the site lists that agent, the loop guards allow it, and only then does the judge see it. The judge can lower
   the duration or refuse; it cannot raise anything above the ceilings.
-* Text written by agents (issue titles, the stated reason) reaches the gatekeeper only inside a length-capped, control-character-stripped section the prompt marks as untrusted.
+* Text written by agents (issue titles, the stated reason) reaches the judge only inside a length-capped, control-character-stripped section the prompt marks as untrusted.
 * The audit log (`/var/log/vault/audit.jsonl`) is append-only and hash-chained; `vaultctl verify-audit` checks the chain offline.
 
 ## How it works
 
 | Component | Runs as | Does |
 |---|---|---|
-| Plugin (`plugin/`) | the Paperclip service user, inside Paperclip | gives agents four tools, asks the gatekeeper model, posts verdicts, writes the session file into the agent's workspace, shows the Vault page |
+| Plugin (`plugin/`) | the Paperclip service user, inside Paperclip | gives agents four tools, asks the judge, posts verdicts, writes the session file into the agent's workspace, shows the Vault page |
 | `vaultd` (`host/vaultd/`) | system user `vault`, no network | ceilings, request ledger, leases, loop guards, prompt rendering, verdict checks, judge-test records, audit log |
 | Login helper (`host/helper/`) | system user `vault-helper` | holds the site secrets, drives headless Chromium for logins, mints OAuth access tokens, keeps the sealed session store, logs out at lease end |
 | `vault-site`, `vaultctl` | root (through `sudo`) | add and remove sites, OAuth authorization, interactive login, status, revoke, unlock |
@@ -36,7 +36,7 @@ No person decides individual requests: the ceilings are set once by the owner, a
 agent -> plugin tool -> plugin.sock -> vaultd -> helper.sock -> helper (Chromium) -> website
          (Paperclip)    signed         ceilings   admin token    password, TOTP seed
                         messages       ledger     + socket mode  never leave the helper
-                        gatekeeper     audit
+                        judge     audit
                         model call
 ```
 
@@ -45,16 +45,16 @@ A request, step by step:
 1. The agent calls `vault_request_login` (a site) or `vault_request_credential` (a named token) with a reason and a number of minutes.
    The plugin checks that the call comes from the agent's own running task, then sends a signed request to `vaultd`.
 2. `vaultd` applies the ceilings. A failing ceiling is a final denial with a code.
-3. `vaultd` renders the gatekeeper prompt itself and returns it with its hash. The plugin sends the prompt to the configured model `k` times
+3. `vaultd` renders the judge prompt itself and returns it with its hash. The plugin sends the prompt to the configured model `k` times
    (default 2) and posts the raw answers. `vaultd` recomputes the decision from the raw answers and refuses it unless the model has passed
    the judge tests for exactly this prompt. No answer in time is a denial.
 4. If the decision is a grant, the helper logs in (or mints a token) and `vaultd` hands the result to the plugin once.
 5. The plugin writes `.vault/<site>-<lease>.session.json` (or `.token.json`) with mode 0600 into the agent's workspace.
 6. At lease end `vaultd` tells the helper to log out or revoke, and the plugin overwrites and removes the file.
 
-The design is described in [docs/DESIGN.md](docs/DESIGN.md); the gatekeeper gate in [docs/judge-model-selection.md](docs/judge-model-selection.md).
+The design is described in [docs/DESIGN.md](docs/DESIGN.md); the judge gate in [docs/judge-model-selection.md](docs/judge-model-selection.md).
 
-### The gatekeeper is not "Paperclip's AI connections"
+### The judge is not "Paperclip's AI connections"
 
 Paperclip has no plugin API that lets a plugin use the AI connections configured in Paperclip. The plugin therefore calls an
 OpenAI-compatible chat-completions endpoint itself: either OpenRouter (or any hosted provider with that API), with the API key stored
@@ -73,7 +73,7 @@ separate from any key your agents use.
 * **Debian or Ubuntu** (`apt-get`) for the automatic dependency install: `xvfb`, `x11vnc`, `acl` and the libraries Chromium needs.
   On other distributions run the installer with `--skip-deps` and install the packages yourself (it prints the list).
 * `curl`, `sha256sum`, `tar`, `gzip`, and `setfacl` (package `acl`) on the host.
-* Outbound HTTPS from the host to GitHub (release download), the Debian/Ubuntu mirrors and Playwright's Chromium download; from the Paperclip process to your gatekeeper provider.
+* Outbound HTTPS from the host to GitHub (release download), the Debian/Ubuntu mirrors and Playwright's Chromium download; from the Paperclip process to your judge provider.
 * A Paperclip instance-admin login for the command line (`paperclipai`) and at least one company.
 
 ## Assumptions
@@ -101,7 +101,7 @@ All steps in this section run as the account that runs Paperclip, except steps 6
 
 2. **Download and verify the plugin** from the release page, and unpack it in a folder you will keep (Paperclip loads the plugin from there):
    ```
-   v=0.1.0
+   v=0.1.1
    base=https://github.com/tomRumi/paperclip-vault/releases/download/v$v
    mkdir -p ~/paperclip-vault && cd ~/paperclip-vault
    curl -fsSL -O "$base/paperclip-vault-plugin-$v.tgz" -O "$base/SHA256SUMS"
@@ -131,7 +131,7 @@ All steps in this section run as the account that runs Paperclip, except steps 6
 
    | Setting | Meaning |
    |---|---|
-   | `adminUserIds` | Paperclip user ids that may create install commands, select the gatekeeper model, run judge tests and revoke leases. |
+   | `adminUserIds` | Paperclip user ids that may create install commands, select the judge, run judge tests and revoke leases. |
    | `workspaceRoots` | Session and token files are written only into the run's issue execution workspace or into `<agentHomeRoot>/<agentId>`, and only when that folder's real path lies under one of these folders. Use the same list as your sandbox's workspace roots. |
    | `agentHomeRoot` | Workspace `<root>/<agentId>` used when the run's issue has no execution workspace (Paperclip's default: the `workspaces` folder above). Must lie under a workspace root. There is no other fallback: the project's shared workspace is never used. |
    | `instanceRoot` | Optional: the Paperclip instance folder. The plugin refuses to work if its key directory or the socket lies inside it. |
@@ -139,7 +139,7 @@ All steps in this section run as the account that runs Paperclip, except steps 6
    | `dataDir` | Where the plugin keeps its signing key (`plugin-key.pem`, mode 0600). Default `~/.local/share/paperclip-vault` of the Paperclip user. Must be outside everything above. |
    | `socketPath` | Default `/run/vault/plugin.sock`. |
    | `toolWaitMs` | How long a tool call waits for the verdict before answering "pending" (default 7000, keep it under the tool gateway's 10 s). |
-   | `gatekeeper` | Provider URL, API key (secret), temperature, `k` (samples per request, 2 to 9, default 2) and per-call timeout. See "Configure the gatekeeper". |
+   | `judge` | Provider URL, API key (secret), temperature, `k` (samples per request, 2 to 9, default 2) and per-call timeout. See "Configure the judge". |
 
 5. **Open the Vault page** in Paperclip (the "Vault" entry; route `vault`), tab **Install**, and press **Create install command**.
    It shows one line, valid for 60 minutes and for a single use. The line downloads `install-vault.sh` from this release, checks its SHA-256 fingerprint, and runs it with `sudo`.
@@ -167,21 +167,21 @@ All steps in this section run as the account that runs Paperclip, except steps 6
    ```
    sudoedit /etc/vault/policy.json && sudo systemctl restart vaultd
    ```
-   Replace the placeholder ids in `agents` with your agents' UUIDs and the role names you use (the role is shown to the gatekeeper as written, so prefer the names in the example: Engineer, QA, UI Tester, Architect, Designer, Researcher, Data Scientist, Business Analyst, Coordinator, Triage Clerk, Security). The Ceilings tab shows the result read-only.
+   Replace the placeholder ids in `agents` with your agents' UUIDs and the role names you use (the role is shown to the judge as written, so prefer the names in the example: Engineer, QA, UI Tester, Architect, Designer, Researcher, Data Scientist, Business Analyst, Coordinator, Triage Clerk, Security). The Ceilings tab shows the result read-only.
    If you installed without `--company`, add the company: `sudo vaultctl company add <company id>`.
 
 ## Configure
 
-### The gatekeeper
+### The judge
 
 1. Create the provider key as a **company secret** in Paperclip, for example (reads the value from an environment variable so it does not appear in the process list; Paperclip's web UI works too):
    ```
-   read -rs GATEKEEPER_KEY && export GATEKEEPER_KEY
-   paperclipai secrets create --company-id <company id> --name vault-gatekeeper-key --value-env GATEKEEPER_KEY
+   read -rs JUDGE_KEY && export JUDGE_KEY
+   paperclipai secrets create --company-id <company id> --name vault-judge-key --value-env JUDGE_KEY
    ```
    Skip this for a local Ollama.
-2. In the plugin's settings form (company selected), fill in `gatekeeper`: **Base URL** (`https://openrouter.ai/api/v1`, or `http://127.0.0.1:11434/v1` for Ollama on the Paperclip host) and **API key** (pick the secret). Leave `k` at 2 or raise it (every one of the `k` answers must allow a request for it to be granted; changing `k` needs new judge tests).
-3. Vault page, tab **Gatekeeper**: **Load model list from provider**, pick a model, **Run judge tests**. The plugin sends the 140 scenarios (those that reach the gatekeeper; the others are stopped by the ceilings before it) to the model, three repeats, `k` answers each, which is several hundred model calls. A model passes only if it granted no injection attempt, made no grant outside the accepted answers, answered stably (mean majority-agreement of the repeats, at least 0.95) and produced at most 1 % unusable answers. `vaultd` re-checks these numbers itself.
+2. In the plugin's settings form (company selected), fill in `judge`: **Base URL** (`https://openrouter.ai/api/v1`, or `http://127.0.0.1:11434/v1` for Ollama on the Paperclip host) and **API key** (pick the secret). Leave `k` at 2 or raise it (every one of the `k` answers must allow a request for it to be granted; changing `k` needs new judge tests).
+3. Vault page, tab **Judge**: **Load model list from provider**, pick a model, **Run judge tests**. The plugin sends the 140 scenarios (those that reach the judge; the others are stopped by the ceilings before it) to the model, three repeats, `k` answers each, which is several hundred model calls. A model passes only if it granted no injection attempt, made no grant outside the accepted answers, answered stably (mean majority-agreement of the repeats, at least 0.95) and produced at most 1 % unusable answers. `vaultd` re-checks these numbers itself.
 4. When the result is "passed", press **Select**. Until a model is selected and has a clean result for the current prompt, scenarios and `k`, every request is denied.
 
 The record is bound to the hash of the prompt and of the scenario file: any change to either voids all results, and you run the tests again. Details: [docs/judge-model-selection.md](docs/judge-model-selection.md).
@@ -192,12 +192,12 @@ The record is bound to the hash of the prompt and of the scenario file: any chan
 
 * `agents`: agent UUID to role. An agent that is not listed is denied (`agent_unpinned`).
 * `roles`: role to the credential classes it may request.
-* `classes`: per class, a `match` glob (or list), `max_minutes` (default 60, never above 480), `scopes`, and `narrow_minutes` (the cap when the gatekeeper chooses "narrow").
+* `classes`: per class, a `match` glob (or list), `max_minutes` (default 60, never above 480), `scopes`, and `narrow_minutes` (the cap when the judge chooses "narrow").
   Credentials named `web-<site>` fall under `web-login` and `oauth-<site>` under `oauth-token`.
 * `never`: extra name patterns that can never be granted. Names starting with `vault` never are.
 * Per site, `allowedAgents` is the hard list of agents that may use it and `maxMinutes` can only lower the class maximum.
 
-Other host settings are in `/etc/vault/config.json` (see `host/config.example.json`). `sudo vaultctl unlock <agent id>` lifts a lock that the gatekeeper set.
+Other host settings are in `/etc/vault/config.json` (see `host/config.example.json`). `sudo vaultctl unlock <agent id>` lifts a lock that the judge set.
 
 ### Add a site
 
@@ -256,7 +256,7 @@ Unpack the new plugin release over the old folder as in step 2 and install the s
 On the host, as the admin account. The Install tab has a section **Uninstall from the host** (tick the box for `--purge`, then **Show uninstall command**) that shows the same download-verify-run line as the install. By hand, from the release page:
 
 ```
-v=0.1.0; base=https://github.com/tomRumi/paperclip-vault/releases/download/v$v
+v=0.1.1; base=https://github.com/tomRumi/paperclip-vault/releases/download/v$v
 d=$(mktemp -d) && cd "$d" && curl -fsSL -O "$base/install-vault.sh" -O "$base/SHA256SUMS" && sha256sum -c --ignore-missing SHA256SUMS
 sudo bash install-vault.sh --uninstall           # stops and removes the units, /opt/vault and the wrappers
 sudo bash install-vault.sh --uninstall --purge   # the same, and deletes what the installer created
@@ -264,7 +264,7 @@ sudo bash install-vault.sh --uninstall --purge   # the same, and deletes what th
 
 `--uninstall` keeps `/etc/vault`, the credential blobs, `/var/lib/vault`, `/var/lib/vault-helper`, the audit log and the two accounts, so a later install resumes where this one stopped. `--purge` removes what `/etc/vault/installed-by` lists as created by the installer, including the site credentials added with `vault-site`, the accounts and the audit log (it lifts the append-only flag first). Anything that existed before the install (your own `vault.<name>` credentials, an existing `/etc/vault`) stays and the output says so.
 
-Then, as the Paperclip user, remove the plugin: `paperclipai plugin uninstall paperclip-vault` (add `--force` to purge its state). Delete `~/.local/share/paperclip-vault` (the plugin key) and the company secret you created for the gatekeeper.
+Then, as the Paperclip user, remove the plugin: `paperclipai plugin uninstall paperclip-vault` (add `--force` to purge its state). Delete `~/.local/share/paperclip-vault` (the plugin key) and the company secret you created for the judge.
 
 ## Known limits
 
@@ -276,7 +276,7 @@ Then, as the Paperclip user, remove the plugin: `paperclipai plugin uninstall pa
 * **Chromium `--no-sandbox` fallback.** The installer tests whether Chromium's own sandbox starts under the helper's unit. On hosts where the kernel blocks unprivileged user namespaces (common on recent Ubuntu), it sets `allowNoSandbox: true` and Chromium runs without its sandbox; the installer prints which mode is active. Isolation then rests on the `vault-helper` account, the hardened unit, and a proxy that lets the browser reach only the hosts listed in the site file.
 * **The interactive login profile** (`/var/lib/vault-helper/profiles/<id>`) is Chromium's own cookie store and is not sealed by the helper's key; it is readable only by `vault-helper` and root.
 * **Debian and Ubuntu only** for the automatic dependency install. Elsewhere use `--skip-deps` and install the packages yourself.
-* **The gatekeeper is a model.** A model that passed the tests can still be wrong on inputs the scenarios do not cover, and a provider can change a model behind the same name. The ceilings bound the damage; read the Decision log and re-run the tests now and then.
+* **The judge is a model.** A model that passed the tests can still be wrong on inputs the scenarios do not cover, and a provider can change a model behind the same name. The ceilings bound the damage; read the Decision log and re-run the tests now and then.
 * **Plugin runtime is alpha** in Paperclip. The plugin UI is plain ES modules against the SDK UI components and is tested with a stand-in for them, not in every Paperclip release.
 * Linux only. One `vaultd` per host, one Paperclip instance per vault.
 
@@ -290,13 +290,13 @@ runs `scripts/test-all.sh` from the repository root and needs no root. Its stage
 
 Requirements: Python 3.11+, Node 24+ and npm. The dependencies of `plugin/` and `host/helper/` are installed from their lock files when `node_modules` is missing. The helper and end-to-end tests drive a real headless Chromium; install the revision `playwright-core` wants once with `cd host/helper && npx playwright-core install chromium` (on a bare host also `npx playwright-core install-deps chromium` as root), or run `SKIP_BROWSER=1 npm test`, which skips the browser suites and says so. The installer tests run `npm ci` twice while building a release, so a full run takes several minutes.
 
-Build a release yourself (writes `dist/`, publishes nothing): `scripts/release.sh --version 0.1.0`; for a local test add `--base-url file:///absolute/dist/` and run the installer with `--prefix DIR` (see `tests/install/test_install.py`).
+Build a release yourself (writes `dist/`, publishes nothing): `scripts/release.sh --version 0.1.1`; for a local test add `--base-url file:///absolute/dist/` and run the installer with `--prefix DIR` (see `tests/install/test_install.py`).
 
 ## Repository layout
 
 * `plugin/`: the Paperclip plugin (see [plugin/README.md](plugin/README.md)).
 * `host/`: `vaultd`, the login helper, CLIs, systemd units, judge scenarios ([host/README.md](host/README.md), [host/INSTALL.md](host/INSTALL.md), [host/judge-tests/README.md](host/judge-tests/README.md)).
-* `scripts/release.sh`: builds the release assets. `tests/`: fakes and installer tests. `docs/`: design and gatekeeper selection.
+* `scripts/release.sh`: builds the release assets. `tests/`: fakes and installer tests. `docs/`: design and judge selection.
 
 ## Licence
 

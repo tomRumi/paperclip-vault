@@ -40,7 +40,7 @@ plugin folder after `npm ci` in `plugin/`, but its Install tab shows no install 
   * *Ceilings*: read-only agent pins, roles to classes, never-list, maxima, locked agents, and the root command that edits the policy.
   * *Decision log*: time, agent, target, minutes, decision, model, provider, each sample's answer with its reason, hash; paged.
   * *Leases*: active leases with Revoke (asks first; removes the file at once).
-  * *Gatekeeper*: provider status, model list, selected model, judge-test result and progress, Run judge tests; Select stays disabled until the model has a clean
+  * *Judge*: provider status, model list, selected model, judge-test result and progress, Run judge tests; Select stays disabled until the model has a clean
     record for the current prompt, scenarios and `k`.
 
 ## Tests

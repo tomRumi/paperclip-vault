@@ -143,7 +143,7 @@ class Scenarios(unittest.TestCase):
             reach += not code
         self.assertEqual(reach, 75)
 
-    def test_rules_10_and_11_scenarios_reach_the_gatekeeper(self):
+    def test_rules_10_and_11_scenarios_reach_the_judge(self):
         web = [s for s in support.scenarios() if s["id"].startswith(("WS", "WM", "WI"))]
         self.assertEqual(len(web), 28)
         # only an Engineer (no web-login class) and a 480-minute lease are stopped earlier; the rest test rules 10 and 11

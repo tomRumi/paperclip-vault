@@ -290,7 +290,7 @@ class SiteStates(Base):
         self.assertEqual({s["state"] for s in listed["sites"]}, {"helper_down"})
         self.assertEqual(listed["helper"], "down")
         self.assertEqual(self.env.ok("sites.list", {"agentId": AGENT_QA})["sites"], [])
-        r = self.env.create()                                                                           # requests still reach the gatekeeper
+        r = self.env.create()                                                                           # requests still reach the judge
         self.assertEqual(r["state"], "awaiting_verdict")
 
     def test_a_recent_issuing_failure_still_marks_a_site_the_helper_calls_ready(self):

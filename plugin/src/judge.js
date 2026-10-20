@@ -97,8 +97,8 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
     let h;
     try { h = await hashes(cfg); } catch { return { cleared: false, reason: "vaultd_unreachable" }; }
     if (promptSha256 && promptSha256 !== h.promptSha256) return { cleared: false, reason: "stale_hashes" };
-    if (!matches(rec, h, cfg.gatekeeper.k)) return { cleared: false, reason: rec.clean ? "stale_hashes" : "not_clean" };
-    return { cleared: true, model: selected.model, provider: provider.id, k: cfg.gatekeeper.k };
+    if (!matches(rec, h, cfg.judge.k)) return { cleared: false, reason: rec.clean ? "stale_hashes" : "not_clean" };
+    return { cleared: true, model: selected.model, provider: provider.id, k: cfg.judge.k };
   }
 
   /**
@@ -108,7 +108,7 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
    */
   async function produceVerdict(cfg, create) {
     const client = clientFor(cfg);
-    const k = cfg.gatekeeper.k;
+    const k = cfg.judge.k;
     const renderedSha256 = sha256(create.prompt);
     const submit = async (body) => {
       try { await client.call("verdict.submit", { requestId: create.requestId, k, promptSha256: create.promptSha256, renderedSha256, ...body }); }
@@ -146,18 +146,18 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
     const provider = providerFor(cfg);
     const rec = await state.records.get(recordKey(provider.id, model));
     const h = await hashes(cfg);
-    if (!matches(rec, h, cfg.gatekeeper.k))
+    if (!matches(rec, h, cfg.judge.k))
       throw new JudgeError("not_cleared", rec
         ? "this model has no clean judge-test result for the current prompt, scenarios and k; run the judge tests again"
         : "this model has not passed the judge tests; run them first");
-    const selected = { model, provider: provider.id, k: cfg.gatekeeper.k, selectedBy: actor.userId, selectedAt: new Date(now()).toISOString() };
+    const selected = { model, provider: provider.id, k: cfg.judge.k, selectedBy: actor.userId, selectedAt: new Date(now()).toISOString() };
     await state.setModel(selected);
     await activity(cfg.companyId, "Vault: judge model selected", { model, provider: provider.id, userId: actor.userId });
     return { ok: true, selected };
   }
 
   async function runTests(model, cfg, provider, startedBy) {
-    const base = { model, provider: provider.id, k: cfg.gatekeeper.k, repeats: REPEATS, startedAt: new Date(now()).toISOString(), startedBy };
+    const base = { model, provider: provider.id, k: cfg.judge.k, repeats: REPEATS, startedAt: new Date(now()).toISOString(), startedBy };
     let done = 0, total = 0;
     const progress = (patch) => state.setJudgeRun({ ...base, state: "running", done, total, ...patch });
     try {
@@ -183,7 +183,7 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
           for (let item = queue.shift(); item; item = queue.shift()) {
             const r = { item, decisions: [], samples: 0, parseFailed: 0 };
             for (let i = 0; i < REPEATS; i += 1) {
-              const samples = await p.judge({ prompt: item.prompt, model, k: cfg.gatekeeper.k });
+              const samples = await p.judge({ prompt: item.prompt, model, k: cfg.judge.k });
               r.decisions.push(aggregate(samples, TEST_LIMITS).decision);
               r.samples += samples.length;
               r.parseFailed += samples.filter((s) => s.parseFailed).length;
@@ -197,10 +197,10 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
       });
       const metrics = computeMetrics(results);
       const clean = isClean(metrics);
-      const record = { model, provider: provider.id, k: cfg.gatekeeper.k, ...h, metrics, clean, at: new Date(now()).toISOString() };
+      const record = { model, provider: provider.id, k: cfg.judge.k, ...h, metrics, clean, at: new Date(now()).toISOString() };
       await state.records.put(recordKey(provider.id, model), record);
       let posted = true;
-      try { await client.call("judge.record", { model, provider: provider.id, k: cfg.gatekeeper.k, ...h, metrics }); }
+      try { await client.call("judge.record", { model, provider: provider.id, k: cfg.judge.k, ...h, metrics }); }
       catch (e) { posted = false; log.warn("judge record could not be posted", { code: e.code }); }
       await state.setJudgeRun({ ...base, state: "done", done, total, finishedAt: new Date(now()).toISOString(), clean, metrics, postedToVaultd: posted });
       await activity(cfg.companyId, clean ? "Vault: judge tests passed" : "Vault: judge tests did not pass", { model, provider: provider.id, metrics });
@@ -217,7 +217,7 @@ export function createJudge({ ctx, state, clientFor, providerFor, now = () => Da
     const provider = providerFor(cfg);
     running = runTests(model, cfg, provider, actor.userId).finally(() => { running = null; });
     await activity(cfg.companyId, "Vault: judge tests started", { model, provider: provider.id, userId: actor.userId });
-    return { started: true, model, provider: provider.id, k: cfg.gatekeeper.k, repeats: REPEATS };
+    return { started: true, model, provider: provider.id, k: cfg.judge.k, repeats: REPEATS };
   }
 
   /** At worker start: a run left in "running" by a previous worker is over. */

@@ -1,7 +1,7 @@
 // Manifest per PaperclipPluginManifestV1 (@paperclipai/shared `pluginManifestV1Schema`). Capabilities and why (least
 // privilege; nothing else is requested):
 //   agent.tools.register    the four agent tools (vault_request_login, vault_request_credential, vault_request_status, vault_list_sites)
-//   ui.page.register        the "Vault" page (install, sites, ceilings, decision log, leases, gatekeeper)
+//   ui.page.register        the "Vault" page (install, sites, ceilings, decision log, leases, judge)
 //   plugin.state.read/write enrolment code and install id, the selected judge model, judge-test results and progress
 //                           (metadata only, never a credential, cookie or token)
 //   jobs.schedule           lease-sweep (deliver ready sessions, remove files of ended leases) and enrol-tick
@@ -14,12 +14,12 @@
 //   projects.read           the issue's project name for the verdict prompt
 //   execution.workspaces.read the issue's execution workspace cwd (workspace source a)
 //   http.outbound           declares the plugin's outbound calls: the verdict provider's chat-completions and model-list requests to
-//                           the configured gatekeeper URL (OpenRouter, Ollama or any OpenAI-compatible endpoint). Nothing else is fetched
-//   secrets.read-ref        the gatekeeper API key, a Paperclip company secret referenced from the settings; resolved per call
+//                           the configured judge URL (OpenRouter, Ollama or any OpenAI-compatible endpoint). Nothing else is fetched
+//   secrets.read-ref        the judge API key, a Paperclip company secret referenced from the settings; resolved per call
 // Not requested: webhooks (enrolment goes plugin -> vaultd), local.folders, managed agents/sessions (the plugin
 // calls the model directly, see docs/DESIGN.md), issues.create/update, approvals.
 // Config (company-scoped in Paperclip; only instance admins can save it): adminUserIds gates every write action; the
-// workspace roots bound where session files may be written; the gatekeeper block selects the verdict provider.
+// workspace roots bound where session files may be written; the judge block selects the verdict provider.
 // The one place the plugin id is written; other modules import it.
 export const PLUGIN_ID = "paperclip-vault";
 
@@ -31,7 +31,7 @@ const MINUTES = { type: "integer", minimum: 1, maximum: 480, description: "How m
 const manifest = {
   id: PLUGIN_ID,
   apiVersion: 1,
-  version: "0.1.0",
+  version: "0.1.1",
   displayName: "Vault",
   description: "Gives agents short, audited web logins and tokens without ever showing them a password: the vault (vaultd) enforces ceilings, a language model reviews each request, and the session lands as a short-lived file in the agent's workspace.",
   author: "tomRumi",
@@ -88,10 +88,10 @@ const manifest = {
         title: "How long a tool call waits for the verdict (ms)",
         description: "After this the tool answers \"pending\" and the agent polls vault_request_status. Keep it below the tool gateway's 10 second default.",
       },
-      gatekeeper: {
+      judge: {
         type: "object",
         additionalProperties: false,
-        title: "Gatekeeper (the model that reviews requests)",
+        title: "Judge (the model that reviews requests)",
         description: "Any OpenAI-compatible chat-completions endpoint. A model can only judge after it passed the judge tests.",
         properties: {
           baseUrl: { type: "string", title: "Base URL", description: "For example https://openrouter.ai/api/v1 or http://127.0.0.1:11434/v1 (Ollama)." },

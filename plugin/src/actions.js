@@ -1,6 +1,6 @@
 // Actions behind the Vault page (ctx.actions: the only plugin calls that carry the caller's identity, which is why every UI
 // read is an action, not a data key). Everything goes through guarded():
-//   reads   listSites, getCeilings, listLog, listLeases, vaultStatus, gatekeeperStatus, judgeTestStatus
+//   reads   listSites, getCeilings, listLog, listLeases, vaultStatus, judgeStatus, judgeTestStatus
 //           -> a signed-in user (agents and system calls refused)
 //   writes  installCommand, uninstallCommand, addSiteCommand, removeSiteCommand, revokeLease, selectModel, refreshModels,
 //           runJudgeTests
@@ -21,7 +21,7 @@ export class BadParams extends Error {
   constructor(message) { super(message); this.name = "BadParams"; this.code = "BAD_PARAMS"; }
 }
 
-export const READ_ACTIONS = ["listSites", "getCeilings", "listLog", "listLeases", "vaultStatus", "gatekeeperStatus", "judgeTestStatus"];
+export const READ_ACTIONS = ["listSites", "getCeilings", "listLog", "listLeases", "vaultStatus", "judgeStatus", "judgeTestStatus"];
 export const WRITE_ACTIONS = ["installCommand", "uninstallCommand", "addSiteCommand", "removeSiteCommand", "revokeLease", "selectModel", "refreshModels", "runJudgeTests"];
 
 export function createActions({ ctx, state, clientFor, enrol, delivery, judge }) {
@@ -61,9 +61,9 @@ export function createActions({ ctx, state, clientFor, enrol, delivery, judge })
       return vault(await cfgOf(p, c, a), "log.read", data);
     },
     vaultStatus: async (_p, c, a) => ({ ...(await enrol.status(c, a)), canEdit: await canEdit(c) }),
-    gatekeeperStatus: async (p, c, a) => {
+    judgeStatus: async (p, c, a) => {
       const cfg = await cfgOf(p, c, a);
-      const g = cfg.gatekeeper;
+      const g = cfg.judge;
       let endpoint = null;
       try { endpoint = normalizeBaseUrl(g.baseUrl) ? new URL(g.baseUrl).host : null; } catch { endpoint = null; }
       return {
@@ -77,7 +77,7 @@ export function createActions({ ctx, state, clientFor, enrol, delivery, judge })
       try { current = await judge.hashes(cfg); } catch { current = null; }
       const records = Object.values(await state.records.all()).map((r) => ({
         model: r.model, provider: r.provider, k: r.k, clean: r.clean, at: r.at, metrics: r.metrics, promptSha256: r.promptSha256, scenariosSha256: r.scenariosSha256,
-        current: Boolean(current) && r.promptSha256 === current.promptSha256 && r.scenariosSha256 === current.scenariosSha256 && r.k === cfg.gatekeeper.k,
+        current: Boolean(current) && r.promptSha256 === current.promptSha256 && r.scenariosSha256 === current.scenariosSha256 && r.k === cfg.judge.k,
       }));
       return { run: await state.judgeRun(), running: judge.isRunning(), records, thresholds: THRESHOLDS, scenarios: current };
     },

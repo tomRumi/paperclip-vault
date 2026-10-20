@@ -81,9 +81,9 @@ const plugin = definePlugin({
     s.judge.recoverInterrupted().catch((e) => ctx.logger.error(`judge run recovery failed: ${e.message}`));
   },
   async onHealth() { return { status: "ok" }; },
-  // Refuses a gatekeeper URL that would send the API key and the prompts over plain http to a non-loopback host.
+  // Refuses a judge URL that would send the API key and the prompts over plain http to a non-loopback host.
   async onValidateConfig(config) {
-    const baseUrl = config?.gatekeeper?.baseUrl;
+    const baseUrl = config?.judge?.baseUrl;
     const problem = typeof baseUrl === "string" && baseUrl.trim() ? baseUrlProblem(baseUrl) : null;
     return problem ? { ok: false, errors: [problem] } : { ok: true };
   },

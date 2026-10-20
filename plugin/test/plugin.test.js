@@ -27,7 +27,7 @@ test("full flow with the real provider, signed protocol and workspace delivery",
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const w = await makeWorld({
     enrolled: false,
-    config: { gatekeeper: { baseUrl: `http://127.0.0.1:${srv.address().port}/v1`, apiKey: { type: "secret_ref", secretId: "77777777-7777-4777-8777-777777777777" }, k: 2, temperature: 0.2, perCallTimeoutMs: 3000 } },
+    config: { judge: { baseUrl: `http://127.0.0.1:${srv.address().port}/v1`, apiKey: { type: "secret_ref", secretId: "77777777-7777-4777-8777-777777777777" }, k: 2, temperature: 0.2, perCallTimeoutMs: 3000 } },
     overrides: { providerFor: undefined, enrol: { pins: { version: "0.1.0", baseUrl: "https://example.org/r/", installVaultSha256: "b".repeat(64) }, serviceUser: () => "paperclip" } },
   });
   w.data.secret = KEY;
@@ -43,7 +43,7 @@ test("full flow with the real provider, signed protocol and workspace delivery",
     await w.services.judge.whenIdle();
     assert.equal((await w.services.state.judgeRun()).clean, true);
     await w.action("selectModel", { model: "vendor/judge-1" }, user(ADMIN));
-    assert.equal(w.c.secretCalls.filter((c) => c.opts.configPath === "gatekeeper.apiKey").length >= 1, true);
+    assert.equal(w.c.secretCalls.filter((c) => c.opts.configPath === "judge.apiKey").length >= 1, true);
     seen.length = 0;
     w.c.secretCalls.length = 0;
     // 3. a request

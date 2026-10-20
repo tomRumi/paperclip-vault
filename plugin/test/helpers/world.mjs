@@ -71,7 +71,7 @@ export async function makeWorld(opts = {}) {
   fs.mkdirSync(ws, { recursive: true });
   const config = {
     adminUserIds: [ADMIN], workspaceRoots: [roots], agentHomeRoot: path.join(roots, "homes"), dataDir, socketPath, toolWaitMs: 3000,
-    gatekeeper: { baseUrl: "http://127.0.0.1:9/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 },
+    judge: { baseUrl: "http://127.0.0.1:9/v1", k: 2, temperature: 0.2, perCallTimeoutMs: 2000 },
     ...opts.config,
   };
   const data = {

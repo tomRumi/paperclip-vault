@@ -36,7 +36,7 @@ HELPER_STATE_AGE = 5                        # seconds a helper ping (up/down and
 FAIL_CODES = ("login_failed", "totp_failed", "challenge_required", "needs_interactive", "captcha", "site_unreachable",
               "recipe_error", "helper_down", "timeout", "needs_authorize")
 # What a failed issuing says about the site itself (the helper has no site-status operation): remembered for NOTE_TTL seconds,
-# during which the site is "not ready" at the ceilings, so a broken site costs no gatekeeper calls. Then the next request retries.
+# during which the site is "not ready" at the ceilings, so a broken site costs no judge calls. Then the next request retries.
 SITE_NOTES = {"missing_credential": "missing_credential", "needs_interactive": "needs_interactive", "captcha": "needs_interactive",
               "challenge_required": "needs_interactive", "needs_owner_ack": "needs_interactive", "needs_authorize": "needs_authorize"}
 NOTE_TTL = 120
@@ -408,7 +408,7 @@ class Broker:
             return deny("aggregate_mismatch")
         if decision == "d":
             self.store.lock_agent(row["agent_id"], now, row["id"])
-            self.alert(f"gatekeeper locked agent {row['agent_id']} (request {row['id']}, target {row['target']})")
+            self.alert(f"judge locked agent {row['agent_id']} (request {row['id']}, target {row['target']})")
             return deny("judge_lock")
         if decision == "c":
             return deny("judge_deny")

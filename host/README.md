@@ -5,7 +5,7 @@ Component reference for the host half of paperclip-vault. What the package is fo
 [INSTALL.md](INSTALL.md) lists the manual steps for `vaultd` alone).
 
 `vaultd` is the broker between the Paperclip plugin and the login helper. Python 3.11+, standard library only. It decides nothing that
-the owner has not set in the ceilings, and it calls no model: the Paperclip plugin runs the gatekeeper model and posts the verdicts.
+the owner has not set in the ceilings, and it calls no model: the Paperclip plugin runs the judge and posts the verdicts.
 
 ```
 agent -> plugin tool -> plugin.sock -> vaultd (ceilings, ledger, audit) -> helper.sock -> helper (Chromium, sealed store) -> site

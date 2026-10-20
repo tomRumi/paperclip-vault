@@ -8,7 +8,7 @@
 //   Ceilings      read-only: agent pins, roles -> classes, never-list, maxima, and the root command that edits them
 //   Decision log  what the reviewing model and vaultd decided, newest first, paged
 //   Leases        active leases, with Revoke for admins
-//   Gatekeeper    provider status, models, judge tests, model selection
+//   Judge    provider status, models, judge tests, model selection
 //
 // Every read and write is a plugin action (the only plugin calls that carry the caller's identity). The page never asks for,
 // holds or sends a password, one-time-code seed or other secret: secrets are typed on the host's terminal. The worker checks
@@ -237,7 +237,7 @@ export function logRow(e) {
 
 const GATE_TEXT = {
   no_model: "No model is selected yet. Run the judge tests for a model, then select it. Until then every request is denied.",
-  provider_not_configured: "The provider is not set up. Open this plugin's settings and fill in the Gatekeeper base URL (and API key). Until then every request is denied.",
+  provider_not_configured: "The provider is not set up. Open this plugin's settings and fill in the Judge base URL (and API key). Until then every request is denied.",
   provider_changed: "The provider changed since the model was selected. Select a model again.",
   no_record: "The selected model has no judge-test result. Run the judge tests again.",
   not_clean: "The selected model did not pass the judge tests. Select another model.",
@@ -247,7 +247,7 @@ const GATE_TEXT = {
 export const gateText = (reason) => GATE_TEXT[reason] ?? `Not cleared (${reason ?? "unknown"}).`;
 
 /**
- * Models shown on the Gatekeeper tab: the provider's list (filtered), every model with a test record, and a typed-in id.
+ * Models shown on the Judge tab: the provider's list (filtered), every model with a test record, and a typed-in id.
  * `select` is allowed only for a model with a clean record that matches the current prompt, scenarios and k.
  */
 export function modelRows({ models = [], records = [], selected = null, filter = "", limit = 50 } = {}) {
@@ -642,10 +642,10 @@ function LeasesTab({ companyId, canEdit, reason }) {
     h("div", { style: row }, h("button", { type: "button", onClick: leases.refresh }, "Refresh")));
 }
 
-// ------------------------------------------------------------------------------------------------ Gatekeeper
+// ------------------------------------------------------------------------------------------------ Judge
 
-function GatekeeperTab({ companyId, canEdit, reason }) {
-  const gk = useRead("gatekeeperStatus", { companyId });
+function JudgeTab({ companyId, canEdit, reason }) {
+  const jg = useRead("judgeStatus", { companyId });
   const jt = useRead("judgeTestStatus", { companyId }, { pollWhen: (d) => d.running === true, everyMs: 2000 });
   const refreshModels = usePluginAction("refreshModels");
   const runTests = usePluginAction("runJudgeTests");
@@ -654,23 +654,23 @@ function GatekeeperTab({ companyId, canEdit, reason }) {
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState(null);
   const wasRunning = jt.data?.running === true;
-  useEffect(() => { if (jt.data && !wasRunning) gk.refresh(); }, [wasRunning]);
-  if ((gk.loading && !gk.data) || (jt.loading && !jt.data)) return h(Loading, { what: "the gatekeeper" });
-  if (gk.error && !gk.data) return h(ReadError, { error: gk.error, retry: gk.refresh });
+  useEffect(() => { if (jt.data && !wasRunning) jg.refresh(); }, [wasRunning]);
+  if ((jg.loading && !jg.data) || (jt.loading && !jt.data)) return h(Loading, { what: "the judge" });
+  if (jg.error && !jg.data) return h(ReadError, { error: jg.error, retry: jg.refresh });
   if (jt.error && !jt.data) return h(ReadError, { error: jt.error, retry: jt.refresh });
-  const g = gk.data;
+  const g = jg.data;
   const j = jt.data;
   const run = j.run;
   const running = j.running === true;
   const list = modelRows({ models: g.models?.models ?? [], records: j.records ?? [], selected: g.selected, filter });
-  const doRefresh = () => act.run(async () => { await refreshModels({ companyId }); setMessage({ tone: "ok", text: "Model list updated." }); gk.refresh(); });
+  const doRefresh = () => act.run(async () => { await refreshModels({ companyId }); setMessage({ tone: "ok", text: "Model list updated." }); jg.refresh(); });
   const doRun = (model) => act.run(async () => { await runTests({ companyId, model }); setMessage({ tone: "pending", text: `Judge tests started for ${model}.` }); jt.refresh(); });
-  const doSelect = (model) => act.run(async () => { await select({ companyId, model }); setMessage({ tone: "ok", text: `${model} now reviews requests.` }); gk.refresh(); });
+  const doSelect = (model) => act.run(async () => { await select({ companyId, model }); setMessage({ tone: "ok", text: `${model} now reviews requests.` }); jg.refresh(); });
 
   return h("div", { style: grid },
     h(Section, { title: "Provider" },
       g.configured ? h("div", { style: row }, h(Notice, { tone: "ok" }, `Connected to ${g.endpoint}`), h(Notice, { tone: g.keyConfigured ? "ok" : "info" }, g.keyConfigured ? "API key set" : "No API key (fine for a local Ollama)"))
-        : h(Notice, { tone: "warning" }, g.configProblem ? `The provider cannot be used: ${g.configProblem}.` : "The provider is not set up. Open this plugin's settings and fill in the Gatekeeper base URL (and the API key, a Paperclip secret)."),
+        : h(Notice, { tone: "warning" }, g.configProblem ? `The provider cannot be used: ${g.configProblem}.` : "The provider is not set up. Open this plugin's settings and fill in the Judge base URL (and the API key, a Paperclip secret)."),
       h("span", { style: muted }, `${g.k} samples per request (all must allow), temperature ${g.temperature}, ${Math.round(g.perCallTimeoutMs / 1000)} s per call. Change these in the plugin's settings; changing the samples needs new judge tests.`)),
     h(Section, { title: "Reviewing model" },
       g.gate?.cleared ? h(Notice, { tone: "ok" }, `${g.gate.model} reviews requests.`) : h(Notice, { tone: "warning" }, gateText(g.gate?.reason)),
@@ -713,7 +713,7 @@ const TABS = [
   { id: "ceilings", label: "Ceilings" },
   { id: "log", label: "Decision log" },
   { id: "leases", label: "Leases" },
-  { id: "gatekeeper", label: "Gatekeeper" },
+  { id: "judge", label: "Judge" },
 ];
 
 export function VaultPage({ context }) {
@@ -737,5 +737,5 @@ export function VaultPage({ context }) {
         : tab === "ceilings" ? h(CeilingsTab, common)
           : tab === "log" ? h(LogTab, common)
             : tab === "leases" ? h(LeasesTab, common)
-              : h(GatekeeperTab, common));
+              : h(JudgeTab, common));
 }

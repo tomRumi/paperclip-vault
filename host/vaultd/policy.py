@@ -1,6 +1,6 @@
 """Hard ceilings, loaded from the root-owned policy.json. Pure code, no I/O except load().
 
-The ceilings run before the gatekeeper and again when its verdict arrives; the gatekeeper can only deny or shorten,
+The ceilings run before the judge and again when its verdict arrives; the judge can only deny or shorten,
 never widen. The requester states the lease length in whole minutes; there is no default.
 Schema: agents{uuid: role}, never[globs], roles{role: [class]}, classes{name: {match, description, max_minutes, scopes, narrow_minutes}}.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 ABSOLUTE_MAX_MINUTES = 480   # no lease is longer, whatever the policy or a site file says
 DEFAULT_MAX_MINUTES = 60     # class without max_minutes (and a site file without maxMinutes)
-DEFAULT_NARROW_MINUTES = 30  # gatekeeper option a
+DEFAULT_NARROW_MINUTES = 30  # judge option a
 CLASS_KEYS = {"match", "description", "max_minutes", "scopes", "narrow_minutes"}
 
 

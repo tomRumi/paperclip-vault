@@ -1,6 +1,6 @@
 {
   "name": "paperclip-vault-helper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Login helper for paperclip-vault: headless Chromium logins, sealed session store.",
   "license": "MIT",

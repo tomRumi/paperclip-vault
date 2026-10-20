@@ -150,7 +150,7 @@ def credential_name(site):
 
 
 def description(site):
-    """The credential_description the gatekeeper sees (TRUSTED: written by the owner in the site file)."""
+    """The credential_description the judge sees (TRUSTED: written by the owner in the site file)."""
     roles = ", ".join(site["roles"]) or "none listed"
     if site["type"] == "oauth":
         return "OAuth access token for %s (kind: %s; purpose: %s; roles: %s). Access token only, no refresh token." % (

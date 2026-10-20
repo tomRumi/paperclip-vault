@@ -21,7 +21,7 @@ const int = (v, dflt, min, max) => (Number.isInteger(v) && v >= min && v <= max 
 /** @returns the normalized settings for a company. */
 export async function readConfig(ctx, companyId) {
   const raw = (await ctx.config.get(companyId).catch(() => null)) ?? {};
-  const g = raw.gatekeeper && typeof raw.gatekeeper === "object" ? raw.gatekeeper : {};
+  const g = raw.judge && typeof raw.judge === "object" ? raw.judge : {};
   return {
     companyId: companyId ?? null,
     adminUserIds: strings(raw.adminUserIds),
@@ -32,7 +32,7 @@ export async function readConfig(ctx, companyId) {
     dataDir: absolute(raw.dataDir) ?? defaultDataDir(),
     socketPath: absolute(raw.socketPath) ?? DEFAULT_SOCKET_PATH,
     toolWaitMs: int(raw.toolWaitMs, DEFAULT_TOOL_WAIT_MS, 0, 50_000),
-    gatekeeper: {
+    judge: {
       baseUrl: typeof g.baseUrl === "string" ? g.baseUrl.trim() : "",
       apiKey: g.apiKey && typeof g.apiKey === "object" ? g.apiKey : null,
       temperature: typeof g.temperature === "number" && g.temperature >= 0 && g.temperature <= 2 ? g.temperature : DEFAULT_TEMPERATURE,
@@ -42,5 +42,5 @@ export async function readConfig(ctx, companyId) {
   };
 }
 
-/** The `gatekeeper` settings in the shape createProvider() takes. */
-export const providerConfig = (cfg) => ({ ...cfg.gatekeeper, companyId: cfg.companyId });
+/** The `judge` settings in the shape createProvider() takes. */
+export const providerConfig = (cfg) => ({ ...cfg.judge, companyId: cfg.companyId });

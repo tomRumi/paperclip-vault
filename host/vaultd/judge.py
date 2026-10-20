@@ -1,4 +1,4 @@
-"""The gatekeeper's text side: prompt rendering, verdict aggregation and the judge-test pass criteria.
+"""The judge's text side: prompt rendering, verdict aggregation and the judge-test pass criteria.
 
 vaultd never calls a model. It renders the prompt (render_prompt, from judge_prompt.md), the Paperclip plugin sends it to the
 configured model k times and posts the k raw answers back. vaultd recomputes the aggregate from the raw answers, so a wrong or

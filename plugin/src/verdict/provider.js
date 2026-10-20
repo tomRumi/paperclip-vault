@@ -20,7 +20,7 @@ import { createOpenAiCompat, ProviderError, MODEL_RE, normalizeBaseUrl, baseUrlP
 export { ProviderError, MODEL_RE, normalizeBaseUrl, baseUrlProblem };
 
 /**
- * @param {object} cfg  the `gatekeeper` config plus `companyId`: {baseUrl, apiKey?, temperature, perCallTimeoutMs, companyId}
+ * @param {object} cfg  the `judge` config plus `companyId`: {baseUrl, apiKey?, temperature, perCallTimeoutMs, companyId}
  * @param {object} ctx  plugin context
  * @param {object} [deps]  {fetch} for tests
  */

@@ -318,7 +318,7 @@ class EndToEnd(unittest.TestCase):
         cls.plugin_config = {
             "adminUserIds": [ADMIN], "workspaceRoots": [cls.p("roots")], "agentHomeRoot": cls.p("roots", "homes"), "dataDir": cls.p("pdata"),
             "socketPath": cls.sock, "toolWaitMs": 1500,
-            "gatekeeper": {"baseUrl": "http://127.0.0.1:%d/v1" % cls.provider.port, "k": 2, "temperature": 0.2, "perCallTimeoutMs": 20000}}
+            "judge": {"baseUrl": "http://127.0.0.1:%d/v1" % cls.provider.port, "k": 2, "temperature": 0.2, "perCallTimeoutMs": 20000}}
         with open(cls.p("driver.json"), "w") as f:
             json.dump({"companyId": COMPANY, "projectId": PROJECT, "adminUserId": ADMIN, "plainUserId": PLAIN_USER, "agents": cls.agent,
                        "pluginConfig": cls.plugin_config,
@@ -572,7 +572,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(self.provider.bad_requests, [])
         self.assertGreater(self.provider.calls["scenario"], 400)
         self.assertEqual(self.action("selectModel", {"model": MODEL})["selected"]["model"], MODEL)
-        gate = self.action("gatekeeperStatus", as_="user")["gate"]
+        gate = self.action("judgeStatus", as_="user")["gate"]
         self.assertTrue(gate["cleared"], gate)
         with self.assertRaises(DriverError):                   # a plain user may read, not change
             self.action("selectModel", {"model": MODEL}, as_="user")

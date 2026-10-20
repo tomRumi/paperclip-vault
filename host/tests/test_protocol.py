@@ -224,7 +224,7 @@ class Enrolment(unittest.TestCase):
     def test_enrolment_stores_the_key_and_unlocks_signed_calls(self):
         r = self.enrol()
         self.assertTrue(r["ok"], r)
-        self.assertEqual(r["data"], {"installId": INSTALL_ID, "vaultdVersion": "0.1.0", "apiVersion": 1})
+        self.assertEqual(r["data"], {"installId": INSTALL_ID, "vaultdVersion": "0.1.1", "apiVersion": 1})
         self.assertEqual(os.stat(self.env.cfg["key_path"]).st_mode & 0o777, 0o600)
         with open(self.env.cfg["key_path"]) as f:
             rec = json.load(f)

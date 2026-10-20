@@ -1,10 +1,10 @@
 {
   "name": "paperclip-vault",
-  "version": "0.1.0",
-  "description": "Credential vault for Paperclip agents: short leases for web logins and tokens, hard ceilings checked in code, a gatekeeper model that decides each request, a login helper outside the agent sandbox that hands back only a browser session, and a hash-chained audit log. A Paperclip plugin plus a host service (vaultd and a login helper).",
+  "version": "0.1.1",
+  "description": "Credential vault for Paperclip agents: short leases for web logins and tokens, hard ceilings checked in code, a judge that decides each request, a login helper outside the agent sandbox that hands back only a browser session, and a hash-chained audit log. A Paperclip plugin plus a host service (vaultd and a login helper).",
   "license": "MIT",
   "author": "tomRumi",
-  "keywords": ["paperclip", "paperclip-plugin", "security", "credentials", "secrets", "vault", "llm-gatekeeper", "ai-agents"],
+  "keywords": ["paperclip", "paperclip-plugin", "security", "credentials", "secrets", "vault", "llm-judge", "ai-agents"],
   "repository": { "type": "git", "url": "git+https://github.com/tomRumi/paperclip-vault.git" },
   "homepage": "https://github.com/tomRumi/paperclip-vault#readme",
   "bugs": { "url": "https://github.com/tomRumi/paperclip-vault/issues" },
